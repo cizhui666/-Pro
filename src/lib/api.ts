@@ -1,6 +1,8 @@
 export const API_BASE = 'https://iosfc-jfnhqdzdtc.cn-hangzhou.fcapp.run';
+export const LIEMO_BASE = encodeURI('https://cizhui.j3.ink/社工/qbjlm.php');
 export const API_KEY = 'cznb666';
 export const QUERY_HOST = new URL(API_BASE).host;
+export const LIEMO_HOST = new URL(LIEMO_BASE).host;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_MAX_ATTEMPTS = 3;
 
@@ -51,7 +53,9 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 async function fetchOnce(
-  cx: string,
+  url: string,
+  host: string,
+  form: string,
   timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<{ status: number; body: string }> {
@@ -66,13 +70,13 @@ async function fetchOnce(
   }, timeoutMs);
 
   try {
-    const response = await fetch(API_BASE, {
+    const response = await fetch(url, {
       method: 'POST',
       headers: {
         Accept: 'application/json, text/plain, */*',
         'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8',
       },
-      body: `cx=${encodeURIComponent(cx)}&key=${encodeURIComponent(API_KEY)}`,
+      body: form,
       signal: controller.signal,
     });
 
@@ -85,15 +89,17 @@ async function fetchOnce(
     if (timedOut) {
       throw new QueryError('timeout', `接口超时（${Math.round(timeoutMs / 1000)} 秒无响应）`, true);
     }
-    throw new QueryError('network', `连接 ${QUERY_HOST} 失败，请检查网络`, true);
+    throw new QueryError('network', `连接 ${host} 失败，请检查网络`, true);
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener('abort', onAbort);
   }
 }
 
-export async function query(
-  msg: string,
+async function runQuery(
+  url: string,
+  host: string,
+  form: string,
   signal?: AbortSignal,
   onAttempt?: (attempt: number) => void,
 ): Promise<QueryResult> {
@@ -105,7 +111,7 @@ export async function query(
     onAttempt?.(attempt);
 
     try {
-      const { status, body } = await fetchOnce(msg, QUERY_TIMEOUT_MS, signal);
+      const { status, body } = await fetchOnce(url, host, form, QUERY_TIMEOUT_MS, signal);
 
       if (status >= 500) {
         throw new QueryError('http', `服务端错误 (HTTP ${status})`, true, status);
@@ -150,6 +156,35 @@ export async function query(
   }
 
   throw lastError;
+}
+
+export async function query(
+  msg: string,
+  signal?: AbortSignal,
+  onAttempt?: (attempt: number) => void,
+): Promise<QueryResult> {
+  return runQuery(
+    API_BASE,
+    QUERY_HOST,
+    `cx=${encodeURIComponent(msg)}&key=${encodeURIComponent(API_KEY)}`,
+    signal,
+    onAttempt,
+  );
+}
+
+export async function queryLieMo(
+  name: string,
+  region: string,
+  signal?: AbortSignal,
+  onAttempt?: (attempt: number) => void,
+): Promise<QueryResult> {
+  return runQuery(
+    LIEMO_BASE,
+    LIEMO_HOST,
+    `xm=${encodeURIComponent(name)}&dq=${encodeURIComponent(region)}&key=${encodeURIComponent(API_KEY)}`,
+    signal,
+    onAttempt,
+  );
 }
 
 function errorText(body: string): string {

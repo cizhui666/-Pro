@@ -10,7 +10,13 @@ type HistoryItem = {
 
 const MAX_HISTORY = 20;
 
-export function useQueryRunner() {
+export type QuerySubmit = (
+  value: string,
+  signal: AbortSignal,
+  onAttempt: (attempt: number) => void,
+) => Promise<QueryResult>;
+
+export function useQueryRunner(submitFn?: QuerySubmit) {
   const [keyword, setKeyword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -46,7 +52,9 @@ export function useQueryRunner() {
       setAttempt(1);
 
       try {
-        const data = await query(trimmed, controller.signal, setAttempt);
+        const data = submitFn
+          ? await submitFn(trimmed, controller.signal, setAttempt)
+          : await query(trimmed, controller.signal, setAttempt);
         if (controller.signal.aborted) return;
         setResult(data);
         setHistory((prev) => {
@@ -70,7 +78,7 @@ export function useQueryRunner() {
         }
       }
     },
-    [loading],
+    [loading, submitFn],
   );
 
   const cancel = useCallback(() => {

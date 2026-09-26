@@ -25,6 +25,7 @@ export const ui = StyleSheet.create({
     borderColor: '#E2E8F0',
   },
   label: { fontSize: 13, fontWeight: '600', color: '#64748B', marginBottom: 8 },
+  labelSpaced: { marginTop: 16 },
   input: {
     minHeight: 76,
     fontSize: 16,
@@ -125,6 +126,16 @@ export const QQ_MAX_LENGTH = 11;
 export const QQ_PATTERN = /^\d{5,11}$/;
 export const EMAIL_MAX_LENGTH = 254;
 export const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+export const NAME_MAX_LENGTH = 20;
+export const REGION_MAX_LENGTH = 20;
+
+export function sanitizeName(text: string): string {
+  return text.replace(/\s/g, '').slice(0, NAME_MAX_LENGTH);
+}
+
+export function sanitizeRegion(text: string): string {
+  return text.replace(/\s/g, '').slice(0, REGION_MAX_LENGTH);
+}
 
 export function sanitizePhone(text: string): string {
   return text.replace(/\D/g, '').slice(0, PHONE_LENGTH);

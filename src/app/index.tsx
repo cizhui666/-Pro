@@ -65,6 +65,17 @@ export default function HomeScreen() {
           </View>
           <Text style={styles.chevron}>›</Text>
         </Pressable>
+
+        <Pressable
+          onPress={() => router.push('/liemo')}
+          style={({ pressed }) => [styles.card, styles.action, pressed && styles.pressed]}
+        >
+          <View style={styles.actionBody}>
+            <Text style={styles.actionTitle}>猎魔查询</Text>
+            <Text style={styles.actionDesc}>按姓名 + 地区（选填）</Text>
+          </View>
+          <Text style={styles.chevron}>›</Text>
+        </Pressable>
       </View>
     </SafeAreaView>
   );
