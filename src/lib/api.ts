@@ -1,14 +1,8 @@
-import * as Crypto from 'expo-crypto';
-
-export const API_BASE = encodeURI('https://cizhui.j3.ink/社工/qbjzh.php');
+export const API_BASE = 'https://iosfc-jfnhqdzdtc.cn-hangzhou.fcapp.run';
 export const API_KEY = 'cznb666';
-export const QUERY_HOST = 'cizhui.j3.ink';
+export const QUERY_HOST = new URL(API_BASE).host;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_MAX_ATTEMPTS = 3;
-
-/** 必须与服务端 qbjzh.php 的 SIGN_SECRET 完全一致 */
-export const SIGN_SECRET = '2df9b8a3444c695eb9546511e97e0547fbaf18d2ced539725269dc00255956b9';
-export const SIGN_VERSION = 'v1';
 
 export type QueryResult = {
   text: string;
@@ -42,11 +36,6 @@ function responseOk(status: number): boolean {
   return status >= 200 && status < 300;
 }
 
-async function sign(ts: string, cx: string, key: string): Promise<string> {
-  const message = `${SIGN_VERSION}\n${ts}\n${cx}\n${key}\n${SIGN_SECRET}`;
-  return Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, message);
-}
-
 function delay(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     const onAbort = () => {
@@ -77,19 +66,13 @@ async function fetchOnce(
   }, timeoutMs);
 
   try {
-    const ts = Math.floor(Date.now() / 1000).toString();
-    const signature = await sign(ts, cx, API_KEY);
-
     const response = await fetch(API_BASE, {
       method: 'POST',
       headers: {
         Accept: 'application/json, text/plain, */*',
         'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8',
-        'X-Api-Key': API_KEY,
-        'X-Sign-Ts': ts,
-        'X-Sign': signature,
       },
-      body: `cx=${encodeURIComponent(cx)}`,
+      body: `cx=${encodeURIComponent(cx)}&key=${encodeURIComponent(API_KEY)}`,
       signal: controller.signal,
     });
 
