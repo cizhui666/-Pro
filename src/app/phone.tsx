@@ -1,6 +1,4 @@
-import * as Clipboard from 'expo-clipboard';
 import { router } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -13,147 +11,73 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { QUERY_MAX_ATTEMPTS, query, QueryError, type QueryResult } from '../lib/api';
+import { ErrorCard, HistoryCard, LoadingCard, ResultCard } from '../components/QueryPanels';
 import { PHONE_LENGTH, PHONE_PATTERN, sanitizePhone, ui } from '../lib/ui';
-
-type HistoryItem = {
-  id: string;
-  keyword: string;
-  at: number;
-};
-
-const MAX_HISTORY = 20;
+import { useQueryRunner } from '../lib/useQuery';
 
 export default function PhoneQueryScreen() {
-  const [phone, setPhone] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<QueryResult | null>(null);
-  const [showRaw, setShowRaw] = useState(false);
-  const [history, setHistory] = useState<HistoryItem[]>([]);
-  const [copied, setCopied] = useState(false);
-  const [attempt, setAttempt] = useState(1);
-  const [elapsed, setElapsed] = useState(0);
-  const abortRef = useRef<AbortController | null>(null);
+  const {
+    keyword,
+    setKeyword,
+    loading,
+    error,
+    setError,
+    result,
+    showRaw,
+    setShowRaw,
+    history,
+    copied,
+    attempt,
+    elapsed,
+    runQuery,
+    pick,
+    cancel,
+    clearHistory,
+    copy,
+  } = useQueryRunner();
 
-  useEffect(() => {
-    if (!loading) return;
-    setElapsed(0);
-    const startedAt = Date.now();
-    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - startedAt) / 1000)), 500);
-    return () => clearInterval(timer);
-  }, [loading]);
-
-  const runQuery = useCallback(
-    async (value: string) => {
-      const trimmed = value.trim();
-      if (!trimmed || loading) return;
-
-      abortRef.current?.abort();
-      const controller = new AbortController();
-      abortRef.current = controller;
-
-      setLoading(true);
-      setError(null);
-      setResult(null);
-      setShowRaw(false);
-      setAttempt(1);
-
-      try {
-        const data = await query(trimmed, controller.signal, setAttempt);
-        if (controller.signal.aborted) return;
-        setResult(data);
-        setHistory((prev) => {
-          const next = [
-            { id: `${Date.now()}`, keyword: trimmed, at: Date.now() },
-            ...prev.filter((item) => item.keyword !== trimmed),
-          ];
-          return next.slice(0, MAX_HISTORY);
-        });
-      } catch (e) {
-        if (controller.signal.aborted) return;
-        setResult(null);
-        if (e instanceof QueryError && e.kind === 'cancelled') {
-          setError('已取消查询');
-        } else {
-          setError(e instanceof Error ? e.message : '查询失败，请稍后重试');
-        }
-      } finally {
-        if (!controller.signal.aborted) {
-          setLoading(false);
-        }
-      }
-    },
-    [loading],
-  );
-
-  const onCancel = useCallback(() => {
-    abortRef.current?.abort();
-    setLoading(false);
-    setError('已取消查询');
-  }, []);
-
-  const onSubmit = useCallback(() => {
-    if (!PHONE_PATTERN.test(phone)) {
+  const onSubmit = () => {
+    if (!PHONE_PATTERN.test(keyword)) {
       setError(`请输入 ${PHONE_LENGTH} 位手机号`);
       return;
     }
-    void runQuery(phone);
-  }, [phone, runQuery]);
+    void runQuery(keyword);
+  };
 
-  const onChange = useCallback((text: string) => {
-    setPhone(sanitizePhone(text));
-  }, []);
-
-  const onPickHistory = useCallback(
-    (value: string) => {
-      setPhone(value);
-      void runQuery(value);
-    },
-    [runQuery],
-  );
-
-  const onCopy = useCallback(async () => {
-    if (!result) return;
-    await Clipboard.setStringAsync(showRaw ? result.raw : result.text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  }, [result, showRaw]);
-
-  const digits = phone.length;
-  const canSubmit = PHONE_PATTERN.test(phone) && !loading;
+  const digits = keyword.length;
+  const canSubmit = PHONE_PATTERN.test(keyword) && !loading;
   const hintColor = digits === 0 ? '#94A3B8' : canSubmit ? '#16A34A' : '#DC2626';
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+    <SafeAreaView style={ui.safe} edges={['top', 'bottom']}>
       <KeyboardAvoidingView
-        style={styles.flex}
+        style={ui.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView
-          style={styles.flex}
-          contentContainerStyle={styles.content}
+          style={ui.flex}
+          contentContainerStyle={ui.content}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
         >
-          <View style={styles.header}>
+          <View style={ui.header}>
             <Pressable
               onPress={() => router.back()}
               hitSlop={8}
-              style={({ pressed }) => [styles.back, pressed && styles.pressed]}
+              style={({ pressed }) => [ui.back, pressed && ui.pressed]}
             >
-              <Text style={styles.backText}>‹ 返回</Text>
+              <Text style={ui.backText}>‹ 返回</Text>
             </Pressable>
-            <Text style={styles.title}>手机号查询</Text>
-            <Text style={styles.subtitle}>词缀-情报局</Text>
+            <Text style={ui.title}>手机号查询</Text>
+            <Text style={ui.subtitle}>词缀-情报局</Text>
           </View>
 
-          <View style={styles.card}>
-            <Text style={styles.label}>手机号</Text>
+          <View style={ui.card}>
+            <Text style={ui.label}>手机号</Text>
             <TextInput
-              style={styles.singleInput}
-              value={phone}
-              onChangeText={onChange}
+              style={ui.singleInput}
+              value={keyword}
+              onChangeText={(text) => setKeyword(sanitizePhone(text))}
               placeholder={`请输入 ${PHONE_LENGTH} 位手机号`}
               placeholderTextColor="#9AA3B2"
               keyboardType="phone-pad"
@@ -163,125 +87,58 @@ export default function PhoneQueryScreen() {
               maxLength={PHONE_LENGTH}
               autoCorrect={false}
             />
-            <Text style={[styles.hint, { color: hintColor }]}>
+            <Text style={[ui.hint, { color: hintColor }]}>
               仅支持纯数字 {PHONE_LENGTH} 位手机号 · 已输入 {digits}/{PHONE_LENGTH}
             </Text>
-            <View style={styles.row}>
+            <View style={ui.row}>
               <Pressable
-                onPress={() => setPhone('')}
-                disabled={!phone || loading}
+                onPress={() => setKeyword('')}
+                disabled={!keyword || loading}
                 style={({ pressed }) => [
-                  styles.btnGhost,
-                  pressed && styles.pressed,
-                  (!phone || loading) && styles.btnDisabled,
+                  ui.btnGhost,
+                  pressed && ui.pressed,
+                  (!keyword || loading) && ui.btnDisabled,
                 ]}
               >
-                <Text style={styles.btnGhostText}>清空</Text>
+                <Text style={ui.btnGhostText}>清空</Text>
               </Pressable>
               <Pressable
                 onPress={onSubmit}
                 disabled={!canSubmit}
                 style={({ pressed }) => [
-                  styles.btnPrimary,
-                  pressed && styles.pressed,
-                  !canSubmit && styles.btnDisabled,
+                  ui.btnPrimary,
+                  pressed && ui.pressed,
+                  !canSubmit && ui.btnDisabled,
                 ]}
               >
                 {loading ? (
                   <ActivityIndicator color="#fff" size="small" />
                 ) : (
-                  <Text style={styles.btnPrimaryText}>查询</Text>
+                  <Text style={ui.btnPrimaryText}>查询</Text>
                 )}
               </Pressable>
             </View>
           </View>
 
-          {loading ? (
-            <View style={styles.card}>
-              <View style={styles.stateBox}>
-                <ActivityIndicator color="#2563EB" />
-                <Text style={styles.stateText}>
-                  正在查询… {elapsed} 秒
-                  {attempt > 1 ? `（第 ${attempt}/${QUERY_MAX_ATTEMPTS} 次尝试）` : ''}
-                </Text>
-                <Pressable
-                  onPress={onCancel}
-                  style={({ pressed }) => [styles.tag, pressed && styles.pressed]}
-                >
-                  <Text style={styles.tagText}>取消</Text>
-                </Pressable>
-              </View>
-            </View>
-          ) : null}
+          {loading ? <LoadingCard elapsed={elapsed} attempt={attempt} onCancel={cancel} /> : null}
 
-          {error ? (
-            <View style={[styles.card, styles.errorCard]}>
-              <Text style={styles.errorTitle}>查询失败</Text>
-              <Text style={styles.errorText}>{error}</Text>
-            </View>
-          ) : null}
+          {error ? <ErrorCard message={error} /> : null}
 
           {result ? (
-            <View style={styles.card}>
-              <View style={styles.resultHeader}>
-                <Text style={styles.label}>查询结果</Text>
-                <View style={styles.resultActions}>
-                  {result.isJson ? (
-                    <Pressable
-                      onPress={() => setShowRaw((v) => !v)}
-                      style={({ pressed }) => [styles.tag, pressed && styles.pressed]}
-                    >
-                      <Text style={styles.tagText}>{showRaw ? '格式化' : '原始'}</Text>
-                    </Pressable>
-                  ) : null}
-                  <Pressable
-                    onPress={() => void onCopy()}
-                    style={({ pressed }) => [styles.tag, pressed && styles.pressed]}
-                  >
-                    <Text style={styles.tagText}>{copied ? '已复制' : '复制'}</Text>
-                  </Pressable>
-                </View>
-              </View>
-              <Text selectable style={styles.resultText}>
-                {showRaw ? result.raw : result.text}
-              </Text>
-            </View>
+            <ResultCard
+              result={result}
+              showRaw={showRaw}
+              copied={copied}
+              onToggleRaw={() => setShowRaw((v) => !v)}
+              onCopy={() => void copy()}
+            />
           ) : null}
 
           {history.length > 0 ? (
-            <View style={styles.card}>
-              <View style={styles.resultHeader}>
-                <Text style={styles.label}>历史记录</Text>
-                <Pressable
-                  onPress={() => setHistory([])}
-                  style={({ pressed }) => [styles.tag, pressed && styles.pressed]}
-                >
-                  <Text style={styles.tagText}>清空</Text>
-                </Pressable>
-              </View>
-              {history.map((item) => (
-                <Pressable
-                  key={item.id}
-                  onPress={() => onPickHistory(item.keyword)}
-                  style={({ pressed }) => [styles.historyRow, pressed && styles.pressed]}
-                >
-                  <Text numberOfLines={1} style={styles.historyText}>
-                    {item.keyword}
-                  </Text>
-                  <Text style={styles.historyTime}>
-                    {new Date(item.at).toLocaleTimeString('zh-CN', {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
+            <HistoryCard items={history} onPick={pick} onClear={clearHistory} />
           ) : null}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
-
-const styles = ui;

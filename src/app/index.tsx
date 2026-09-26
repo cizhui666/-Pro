@@ -43,6 +43,17 @@ export default function HomeScreen() {
           </View>
           <Text style={styles.chevron}>›</Text>
         </Pressable>
+
+        <Pressable
+          onPress={() => router.push('/qq')}
+          style={({ pressed }) => [styles.card, styles.action, pressed && styles.pressed]}
+        >
+          <View style={styles.actionBody}>
+            <Text style={styles.actionTitle}>QQ号查询</Text>
+            <Text style={styles.actionDesc}>仅支持 5~11 位 QQ 号</Text>
+          </View>
+          <Text style={styles.chevron}>›</Text>
+        </Pressable>
       </View>
     </SafeAreaView>
   );

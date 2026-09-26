@@ -12,15 +12,16 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ErrorCard, HistoryCard, LoadingCard, ResultCard } from '../components/QueryPanels';
-import { ui } from '../lib/ui';
+import { QQ_MAX_LENGTH, QQ_MIN_LENGTH, QQ_PATTERN, sanitizeQq, ui } from '../lib/ui';
 import { useQueryRunner } from '../lib/useQuery';
 
-export default function QueryScreen() {
+export default function QqQueryScreen() {
   const {
     keyword,
     setKeyword,
     loading,
     error,
+    setError,
     result,
     showRaw,
     setShowRaw,
@@ -28,14 +29,24 @@ export default function QueryScreen() {
     copied,
     attempt,
     elapsed,
-    submit,
+    runQuery,
     pick,
     cancel,
     clearHistory,
     copy,
   } = useQueryRunner();
 
-  const canSubmit = keyword.trim().length > 0 && !loading;
+  const onSubmit = () => {
+    if (!QQ_PATTERN.test(keyword)) {
+      setError(`请输入 ${QQ_MIN_LENGTH}~${QQ_MAX_LENGTH} 位 QQ 号`);
+      return;
+    }
+    void runQuery(keyword);
+  };
+
+  const digits = keyword.length;
+  const canSubmit = QQ_PATTERN.test(keyword) && !loading;
+  const hintColor = digits === 0 ? '#94A3B8' : canSubmit ? '#16A34A' : '#DC2626';
 
   return (
     <SafeAreaView style={ui.safe} edges={['top', 'bottom']}>
@@ -57,26 +68,28 @@ export default function QueryScreen() {
             >
               <Text style={ui.backText}>‹ 返回</Text>
             </Pressable>
-            <Text style={ui.title}>综合查询</Text>
+            <Text style={ui.title}>QQ号查询</Text>
             <Text style={ui.subtitle}>词缀-情报局</Text>
           </View>
 
           <View style={ui.card}>
-            <Text style={ui.label}>查询内容</Text>
+            <Text style={ui.label}>QQ号</Text>
             <TextInput
-              style={ui.input}
+              style={ui.singleInput}
               value={keyword}
-              onChangeText={setKeyword}
-              placeholder="请输入要查询的内容"
+              onChangeText={(text) => setKeyword(sanitizeQq(text))}
+              placeholder={`请输入 ${QQ_MIN_LENGTH}~${QQ_MAX_LENGTH} 位 QQ 号`}
               placeholderTextColor="#9AA3B2"
+              keyboardType="number-pad"
               returnKeyType="search"
-              onSubmitEditing={submit}
+              onSubmitEditing={onSubmit}
               editable={!loading}
-              multiline
-              maxLength={500}
-              autoCapitalize="none"
+              maxLength={QQ_MAX_LENGTH}
               autoCorrect={false}
             />
+            <Text style={[ui.hint, { color: hintColor }]}>
+              仅支持纯数字 {QQ_MIN_LENGTH}~{QQ_MAX_LENGTH} 位 QQ 号 · 已输入 {digits}/{QQ_MAX_LENGTH}
+            </Text>
             <View style={ui.row}>
               <Pressable
                 onPress={() => setKeyword('')}
@@ -90,7 +103,7 @@ export default function QueryScreen() {
                 <Text style={ui.btnGhostText}>清空</Text>
               </Pressable>
               <Pressable
-                onPress={submit}
+                onPress={onSubmit}
                 disabled={!canSubmit}
                 style={({ pressed }) => [
                   ui.btnPrimary,

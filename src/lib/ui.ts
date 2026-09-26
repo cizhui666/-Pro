@@ -120,6 +120,9 @@ export const PHONE_LENGTH = 11;
 export const PHONE_PATTERN = /^\d{11}$/;
 export const ID_LENGTH = 18;
 export const ID_PATTERN = /^\d{17}[\dX]$/;
+export const QQ_MIN_LENGTH = 5;
+export const QQ_MAX_LENGTH = 11;
+export const QQ_PATTERN = /^\d{5,11}$/;
 
 export function sanitizePhone(text: string): string {
   return text.replace(/\D/g, '').slice(0, PHONE_LENGTH);
@@ -127,4 +130,8 @@ export function sanitizePhone(text: string): string {
 
 export function sanitizeIdCard(text: string): string {
   return text.toUpperCase().replace(/[^0-9X]/g, '').slice(0, ID_LENGTH);
+}
+
+export function sanitizeQq(text: string): string {
+  return text.replace(/\D/g, '').slice(0, QQ_MAX_LENGTH);
 }
