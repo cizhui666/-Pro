@@ -1,5 +1,5 @@
 import * as Clipboard from 'expo-clipboard';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { query, type QueryResult } from '../lib/api';
+import { QUERY_MAX_ATTEMPTS, query, QueryError, type QueryResult } from '../lib/api';
 
 type HistoryItem = {
   id: string;
@@ -31,7 +31,17 @@ export default function QueryScreen() {
   const [showRaw, setShowRaw] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [copied, setCopied] = useState(false);
+  const [attempt, setAttempt] = useState(1);
+  const [elapsed, setElapsed] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (!loading) return;
+    setElapsed(0);
+    const startedAt = Date.now();
+    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - startedAt) / 1000)), 500);
+    return () => clearInterval(timer);
+  }, [loading]);
 
   const runQuery = useCallback(
     async (value: string) => {
@@ -46,9 +56,10 @@ export default function QueryScreen() {
       setError(null);
       setResult(null);
       setShowRaw(false);
+      setAttempt(1);
 
       try {
-        const data = await query(trimmed, controller.signal);
+        const data = await query(trimmed, controller.signal, setAttempt);
         if (controller.signal.aborted) return;
         setResult(data);
         setHistory((prev) => {
@@ -61,7 +72,11 @@ export default function QueryScreen() {
       } catch (e) {
         if (controller.signal.aborted) return;
         setResult(null);
-        setError(e instanceof Error ? e.message : '查询失败，请稍后重试');
+        if (e instanceof QueryError && e.kind === 'cancelled') {
+          setError('已取消查询');
+        } else {
+          setError(e instanceof Error ? e.message : '查询失败，请稍后重试');
+        }
       } finally {
         if (!controller.signal.aborted) {
           setLoading(false);
@@ -70,6 +85,12 @@ export default function QueryScreen() {
     },
     [loading],
   );
+
+  const onCancel = useCallback(() => {
+    abortRef.current?.abort();
+    setLoading(false);
+    setError('已取消查询');
+  }, []);
 
   const onSubmit = useCallback(() => {
     void runQuery(keyword);
@@ -159,7 +180,16 @@ export default function QueryScreen() {
             <View style={styles.card}>
               <View style={styles.stateBox}>
                 <ActivityIndicator color="#2563EB" />
-                <Text style={styles.stateText}>正在查询…</Text>
+                <Text style={styles.stateText}>
+                  正在查询… {elapsed} 秒
+                  {attempt > 1 ? `（第 ${attempt}/${QUERY_MAX_ATTEMPTS} 次尝试）` : ''}
+                </Text>
+                <Pressable
+                  onPress={onCancel}
+                  style={({ pressed }) => [styles.tag, pressed && styles.pressed]}
+                >
+                  <Text style={styles.tagText}>取消</Text>
+                </Pressable>
               </View>
             </View>
           ) : null}
@@ -282,8 +312,13 @@ const styles = StyleSheet.create({
   btnGhostText: { color: '#475569', fontSize: 16, fontWeight: '600' },
   btnDisabled: { opacity: 0.45 },
   pressed: { opacity: 0.65 },
-  stateBox: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 },
-  stateText: { fontSize: 15, color: '#475569' },
+  stateBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 4,
+  },
+  stateText: { flex: 1, fontSize: 15, color: '#475569' },
   errorCard: { borderColor: '#FECACA', backgroundColor: '#FEF2F2' },
   errorTitle: { fontSize: 14, fontWeight: '700', color: '#DC2626', marginBottom: 4 },
   errorText: { fontSize: 14, color: '#B91C1C', lineHeight: 21 },
