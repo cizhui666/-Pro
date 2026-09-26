@@ -123,6 +123,8 @@ export const ID_PATTERN = /^\d{17}[\dX]$/;
 export const QQ_MIN_LENGTH = 5;
 export const QQ_MAX_LENGTH = 11;
 export const QQ_PATTERN = /^\d{5,11}$/;
+export const EMAIL_MAX_LENGTH = 254;
+export const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
 export function sanitizePhone(text: string): string {
   return text.replace(/\D/g, '').slice(0, PHONE_LENGTH);
@@ -134,4 +136,8 @@ export function sanitizeIdCard(text: string): string {
 
 export function sanitizeQq(text: string): string {
   return text.replace(/\D/g, '').slice(0, QQ_MAX_LENGTH);
+}
+
+export function sanitizeEmail(text: string): string {
+  return text.trim().slice(0, EMAIL_MAX_LENGTH);
 }

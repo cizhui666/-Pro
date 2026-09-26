@@ -54,6 +54,17 @@ export default function HomeScreen() {
           </View>
           <Text style={styles.chevron}>›</Text>
         </Pressable>
+
+        <Pressable
+          onPress={() => router.push('/email')}
+          style={({ pressed }) => [styles.card, styles.action, pressed && styles.pressed]}
+        >
+          <View style={styles.actionBody}>
+            <Text style={styles.actionTitle}>邮箱查询</Text>
+            <Text style={styles.actionDesc}>需为 用户名@域名.后缀 格式</Text>
+          </View>
+          <Text style={styles.chevron}>›</Text>
+        </Pressable>
       </View>
     </SafeAreaView>
   );
