@@ -1,10 +1,10 @@
 {
   "expo": {
-    "name": "查询工具",
+    "name": "词社",
     "slug": "cxgj",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/cz-icon.png",
     "scheme": "cxgj",
     "userInterfaceStyle": "light",
     "ios": {
