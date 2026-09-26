@@ -134,7 +134,7 @@ export async function verifyCard(card: string): Promise<LicenseState> {
   const text = (await response.text()).trim();
 
   if (!response.ok) {
-    const detail = text && text.length <= 80 && !text.startsWith('{') ? text : '';
+    const detail = text && text.length <= 300 && !text.startsWith('{') ? text : '';
     if (response.status === 424) {
       throw new LicenseError(detail || '验证服务器暂时不可用，请稍后重试');
     }
