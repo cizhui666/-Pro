@@ -21,6 +21,17 @@ export default function HomeScreen() {
           </View>
           <Text style={styles.chevron}>›</Text>
         </Pressable>
+
+        <Pressable
+          onPress={() => router.push('/phone')}
+          style={({ pressed }) => [styles.card, styles.action, pressed && styles.pressed]}
+        >
+          <View style={styles.actionBody}>
+            <Text style={styles.actionTitle}>手机号查询</Text>
+            <Text style={styles.actionDesc}>仅支持 11 位手机号</Text>
+          </View>
+          <Text style={styles.chevron}>›</Text>
+        </Pressable>
       </View>
     </SafeAreaView>
   );

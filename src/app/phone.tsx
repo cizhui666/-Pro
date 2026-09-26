@@ -7,6 +7,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   View,
@@ -14,7 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { QUERY_MAX_ATTEMPTS, query, QueryError, type QueryResult } from '../lib/api';
-import { ui } from '../lib/ui';
+import { PHONE_LENGTH, PHONE_PATTERN, ui } from '../lib/ui';
 
 type HistoryItem = {
   id: string;
@@ -24,8 +25,8 @@ type HistoryItem = {
 
 const MAX_HISTORY = 20;
 
-export default function QueryScreen() {
-  const [keyword, setKeyword] = useState('');
+export default function PhoneQueryScreen() {
+  const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<QueryResult | null>(null);
@@ -94,12 +95,20 @@ export default function QueryScreen() {
   }, []);
 
   const onSubmit = useCallback(() => {
-    void runQuery(keyword);
-  }, [keyword, runQuery]);
+    if (!PHONE_PATTERN.test(phone)) {
+      setError(`请输入 ${PHONE_LENGTH} 位手机号`);
+      return;
+    }
+    void runQuery(phone);
+  }, [phone, runQuery]);
+
+  const onChange = useCallback((text: string) => {
+    setPhone(text.replace(/\D/g, '').slice(0, PHONE_LENGTH));
+  }, []);
 
   const onPickHistory = useCallback(
     (value: string) => {
-      setKeyword(value);
+      setPhone(value);
       void runQuery(value);
     },
     [runQuery],
@@ -112,7 +121,9 @@ export default function QueryScreen() {
     setTimeout(() => setCopied(false), 1500);
   }, [result, showRaw]);
 
-  const canSubmit = keyword.trim().length > 0 && !loading;
+  const digits = phone.length;
+  const canSubmit = PHONE_PATTERN.test(phone) && !loading;
+  const hintColor = digits === 0 ? '#94A3B8' : canSubmit ? '#16A34A' : '#DC2626';
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -134,34 +145,36 @@ export default function QueryScreen() {
             >
               <Text style={styles.backText}>‹ 返回</Text>
             </Pressable>
-            <Text style={styles.title}>综合查询</Text>
+            <Text style={styles.title}>手机号查询</Text>
             <Text style={styles.subtitle}>词缀-情报局</Text>
           </View>
 
           <View style={styles.card}>
-            <Text style={styles.label}>查询内容</Text>
+            <Text style={styles.label}>手机号</Text>
             <TextInput
-              style={styles.input}
-              value={keyword}
-              onChangeText={setKeyword}
-              placeholder="请输入要查询的内容"
+              style={styles.phoneInput}
+              value={phone}
+              onChangeText={onChange}
+              placeholder={`请输入 ${PHONE_LENGTH} 位手机号`}
               placeholderTextColor="#9AA3B2"
+              keyboardType="phone-pad"
               returnKeyType="search"
               onSubmitEditing={onSubmit}
               editable={!loading}
-              multiline
-              maxLength={500}
-              autoCapitalize="none"
+              maxLength={PHONE_LENGTH}
               autoCorrect={false}
             />
+            <Text style={[styles.hint, { color: hintColor }]}>
+              仅支持纯数字 {PHONE_LENGTH} 位手机号 · 已输入 {digits}/{PHONE_LENGTH}
+            </Text>
             <View style={styles.row}>
               <Pressable
-                onPress={() => setKeyword('')}
-                disabled={!keyword || loading}
+                onPress={() => setPhone('')}
+                disabled={!phone || loading}
                 style={({ pressed }) => [
                   styles.btnGhost,
                   pressed && styles.pressed,
-                  (!keyword || loading) && styles.btnDisabled,
+                  (!phone || loading) && styles.btnDisabled,
                 ]}
               >
                 <Text style={styles.btnGhostText}>清空</Text>
@@ -272,4 +285,21 @@ export default function QueryScreen() {
   );
 }
 
-const styles = ui;
+const styles = {
+  ...ui,
+  ...StyleSheet.create({
+    phoneInput: {
+      height: 52,
+      fontSize: 18,
+      letterSpacing: 2,
+      color: '#0F172A',
+      backgroundColor: '#F8FAFC',
+      borderRadius: 12,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: '#E2E8F0',
+      paddingHorizontal: 14,
+      textAlignVertical: 'center',
+    },
+    hint: { fontSize: 12, marginTop: 8 },
+  }),
+};
