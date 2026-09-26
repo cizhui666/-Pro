@@ -1,4 +1,5 @@
 import { encryptParams } from './secure';
+import { invalidateLicense, requireLicenseParams } from './license';
 
 export const API_BASE = 'https://iosfc-jfnhqdzdtc.cn-hangzhou.fcapp.run';
 export const LIEMO_BASE = 'https://iosfc-jfnhqdzdtc.cn-hangzhou.fcapp.run/qbjlm.php';
@@ -115,8 +116,14 @@ async function runQuery(
     try {
       const { status, body } = await fetchOnce(url, host, params, QUERY_TIMEOUT_MS, signal);
 
+      if (status === 402) {
+        invalidateLicense();
+        throw new QueryError('http', errorText(body) || '卡密不可用，请重新验证', false, status);
+      }
+
       if (status >= 500) {
-        throw new QueryError('http', `服务端错误 (HTTP ${status})`, true, status);
+        const detail = errorText(body);
+        throw new QueryError('http', detail || `服务端错误 (HTTP ${status})`, true, status);
       }
       if (!responseOk(status)) {
         const detail = errorText(body);
@@ -165,7 +172,14 @@ export async function query(
   signal?: AbortSignal,
   onAttempt?: (attempt: number) => void,
 ): Promise<QueryResult> {
-  return runQuery(API_BASE, QUERY_HOST, { cx: msg, key: API_KEY }, signal, onAttempt);
+  const license = await requireLicenseParams();
+  return runQuery(
+    API_BASE,
+    QUERY_HOST,
+    { cx: msg, key: API_KEY, card: license.card, markcode: license.markcode },
+    signal,
+    onAttempt,
+  );
 }
 
 export async function queryLieMo(
@@ -174,10 +188,17 @@ export async function queryLieMo(
   signal?: AbortSignal,
   onAttempt?: (attempt: number) => void,
 ): Promise<QueryResult> {
+  const license = await requireLicenseParams();
   return runQuery(
     LIEMO_BASE,
     LIEMO_HOST,
-    { xm: name, dq: region, key: API_KEY },
+    {
+      xm: name,
+      dq: region,
+      key: API_KEY,
+      card: license.card,
+      markcode: license.markcode,
+    },
     signal,
     onAttempt,
   );
