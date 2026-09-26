@@ -1,5 +1,5 @@
 export const API_BASE = 'https://iosfc-jfnhqdzdtc.cn-hangzhou.fcapp.run';
-export const LIEMO_BASE = encodeURI('https://cizhui.j3.ink/社工/qbjlm.php');
+export const LIEMO_BASE = 'https://iosfc-jfnhqdzdtc.cn-hangzhou.fcapp.run/qbjlm.php';
 export const API_KEY = 'cznb666';
 export const QUERY_HOST = new URL(API_BASE).host;
 export const LIEMO_HOST = new URL(LIEMO_BASE).host;
