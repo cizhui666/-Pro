@@ -6,6 +6,7 @@
     "expo": "~55.0.31",
     "expo-clipboard": "~55.0.17",
     "expo-constants": "~55.0.17",
+    "expo-crypto": "~55.0.19",
     "expo-font": "~55.0.8",
     "expo-linking": "~55.0.17",
     "expo-router": "~55.0.18",

@@ -1,8 +1,14 @@
+import * as Crypto from 'expo-crypto';
+
 export const API_BASE = encodeURI('https://cizhui.j3.ink/社工/qbjzh.php');
 export const API_KEY = 'cznb666';
 export const QUERY_HOST = 'cizhui.j3.ink';
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_MAX_ATTEMPTS = 3;
+
+/** 必须与服务端 qbjzh.php 的 SIGN_SECRET 完全一致 */
+export const SIGN_SECRET = '2df9b8a3444c695eb9546511e97e0547fbaf18d2ced539725269dc00255956b9';
+export const SIGN_VERSION = 'v1';
 
 export type QueryResult = {
   text: string;
@@ -32,22 +38,31 @@ function formatJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
+function responseOk(status: number): boolean {
+  return status >= 200 && status < 300;
+}
+
+async function sign(ts: string, cx: string, key: string): Promise<string> {
+  const message = `${SIGN_VERSION}\n${ts}\n${cx}\n${key}\n${SIGN_SECRET}`;
+  return Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, message);
+}
+
 function delay(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
     const onAbort = () => {
       clearTimeout(timer);
       reject(new QueryError('cancelled', '已取消查询', false));
     };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
     signal?.addEventListener('abort', onAbort, { once: true });
   });
 }
 
 async function fetchOnce(
-  url: string,
+  cx: string,
   timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<{ status: number; body: string }> {
@@ -62,11 +77,22 @@ async function fetchOnce(
   }, timeoutMs);
 
   try {
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: { Accept: 'application/json, text/plain, */*' },
+    const ts = Math.floor(Date.now() / 1000).toString();
+    const signature = await sign(ts, cx, API_KEY);
+
+    const response = await fetch(API_BASE, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json, text/plain, */*',
+        'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8',
+        'X-Api-Key': API_KEY,
+        'X-Sign-Ts': ts,
+        'X-Sign': signature,
+      },
+      body: `cx=${encodeURIComponent(cx)}`,
       signal: controller.signal,
     });
+
     const body = await response.text();
     return { status: response.status, body };
   } catch {
@@ -88,7 +114,6 @@ export async function query(
   signal?: AbortSignal,
   onAttempt?: (attempt: number) => void,
 ): Promise<QueryResult> {
-  const url = `${API_BASE}?cx=${encodeURIComponent(msg)}&key=${encodeURIComponent(API_KEY)}`;
   const startedAt = Date.now();
   let lastError: QueryError = new QueryError('network', '查询失败，请稍后重试');
 
@@ -97,13 +122,14 @@ export async function query(
     onAttempt?.(attempt);
 
     try {
-      const { status, body } = await fetchOnce(url, QUERY_TIMEOUT_MS, signal);
+      const { status, body } = await fetchOnce(msg, QUERY_TIMEOUT_MS, signal);
 
       if (status >= 500) {
         throw new QueryError('http', `服务端错误 (HTTP ${status})`, true, status);
       }
       if (!responseOk(status)) {
-        throw new QueryError('http', `接口返回错误 (HTTP ${status})`, false, status);
+        const detail = errorText(body);
+        throw new QueryError('http', detail || `接口返回错误 (HTTP ${status})`, false, status);
       }
 
       const raw = body.trim();
@@ -142,6 +168,8 @@ export async function query(
   throw lastError;
 }
 
-function responseOk(status: number): boolean {
-  return status >= 200 && status < 300;
+function errorText(body: string): string {
+  const text = body.trim();
+  if (!text || text.length > 120 || text.startsWith('<')) return '';
+  return text;
 }

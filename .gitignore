@@ -39,3 +39,7 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# server-side (never publish the endpoint secret / upstream)
+qbjzh.php
+.rlcache/
