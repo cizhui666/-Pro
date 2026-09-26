@@ -42,4 +42,5 @@ yarn-error.*
 
 # server-side (never publish the endpoint secret / upstream)
 qbjzh.php
+fc/
 .rlcache/
