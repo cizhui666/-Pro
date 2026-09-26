@@ -32,6 +32,17 @@ export default function HomeScreen() {
           </View>
           <Text style={styles.chevron}>›</Text>
         </Pressable>
+
+        <Pressable
+          onPress={() => router.push('/idcard')}
+          style={({ pressed }) => [styles.card, styles.action, pressed && styles.pressed]}
+        >
+          <View style={styles.actionBody}>
+            <Text style={styles.actionTitle}>身份证号查询</Text>
+            <Text style={styles.actionDesc}>仅支持 18 位身份证号</Text>
+          </View>
+          <Text style={styles.chevron}>›</Text>
+        </Pressable>
       </View>
     </SafeAreaView>
   );

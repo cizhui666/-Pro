@@ -14,7 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { QUERY_MAX_ATTEMPTS, query, QueryError, type QueryResult } from '../lib/api';
-import { PHONE_LENGTH, PHONE_PATTERN, sanitizePhone, ui } from '../lib/ui';
+import { ID_LENGTH, ID_PATTERN, sanitizeIdCard, ui } from '../lib/ui';
 
 type HistoryItem = {
   id: string;
@@ -24,8 +24,8 @@ type HistoryItem = {
 
 const MAX_HISTORY = 20;
 
-export default function PhoneQueryScreen() {
-  const [phone, setPhone] = useState('');
+export default function IdCardQueryScreen() {
+  const [idCard, setIdCard] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<QueryResult | null>(null);
@@ -94,20 +94,20 @@ export default function PhoneQueryScreen() {
   }, []);
 
   const onSubmit = useCallback(() => {
-    if (!PHONE_PATTERN.test(phone)) {
-      setError(`请输入 ${PHONE_LENGTH} 位手机号`);
+    if (!ID_PATTERN.test(idCard)) {
+      setError(`请输入 ${ID_LENGTH} 位身份证号`);
       return;
     }
-    void runQuery(phone);
-  }, [phone, runQuery]);
+    void runQuery(idCard);
+  }, [idCard, runQuery]);
 
   const onChange = useCallback((text: string) => {
-    setPhone(sanitizePhone(text));
+    setIdCard(sanitizeIdCard(text));
   }, []);
 
   const onPickHistory = useCallback(
     (value: string) => {
-      setPhone(value);
+      setIdCard(value);
       void runQuery(value);
     },
     [runQuery],
@@ -120,8 +120,8 @@ export default function PhoneQueryScreen() {
     setTimeout(() => setCopied(false), 1500);
   }, [result, showRaw]);
 
-  const digits = phone.length;
-  const canSubmit = PHONE_PATTERN.test(phone) && !loading;
+  const digits = idCard.length;
+  const canSubmit = ID_PATTERN.test(idCard) && !loading;
   const hintColor = digits === 0 ? '#94A3B8' : canSubmit ? '#16A34A' : '#DC2626';
 
   return (
@@ -144,36 +144,37 @@ export default function PhoneQueryScreen() {
             >
               <Text style={styles.backText}>‹ 返回</Text>
             </Pressable>
-            <Text style={styles.title}>手机号查询</Text>
+            <Text style={styles.title}>身份证号查询</Text>
             <Text style={styles.subtitle}>词缀-情报局</Text>
           </View>
 
           <View style={styles.card}>
-            <Text style={styles.label}>手机号</Text>
+            <Text style={styles.label}>身份证号</Text>
             <TextInput
               style={styles.singleInput}
-              value={phone}
+              value={idCard}
               onChangeText={onChange}
-              placeholder={`请输入 ${PHONE_LENGTH} 位手机号`}
+              placeholder={`请输入 ${ID_LENGTH} 位身份证号`}
               placeholderTextColor="#9AA3B2"
-              keyboardType="phone-pad"
+              keyboardType="numbers-and-punctuation"
+              autoCapitalize="characters"
               returnKeyType="search"
               onSubmitEditing={onSubmit}
               editable={!loading}
-              maxLength={PHONE_LENGTH}
+              maxLength={ID_LENGTH}
               autoCorrect={false}
             />
             <Text style={[styles.hint, { color: hintColor }]}>
-              仅支持纯数字 {PHONE_LENGTH} 位手机号 · 已输入 {digits}/{PHONE_LENGTH}
+              仅支持 {ID_LENGTH} 位身份证号（末位可为 X）· 已输入 {digits}/{ID_LENGTH}
             </Text>
             <View style={styles.row}>
               <Pressable
-                onPress={() => setPhone('')}
-                disabled={!phone || loading}
+                onPress={() => setIdCard('')}
+                disabled={!idCard || loading}
                 style={({ pressed }) => [
                   styles.btnGhost,
                   pressed && styles.pressed,
-                  (!phone || loading) && styles.btnDisabled,
+                  (!idCard || loading) && styles.btnDisabled,
                 ]}
               >
                 <Text style={styles.btnGhostText}>清空</Text>

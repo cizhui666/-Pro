@@ -37,6 +37,19 @@ export const ui = StyleSheet.create({
     paddingVertical: 12,
     textAlignVertical: 'top',
   },
+  singleInput: {
+    height: 52,
+    fontSize: 18,
+    letterSpacing: 2,
+    color: '#0F172A',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#E2E8F0',
+    paddingHorizontal: 14,
+    textAlignVertical: 'center',
+  },
+  hint: { fontSize: 12, marginTop: 8 },
   row: { flexDirection: 'row', gap: 10, marginTop: 14 },
   btnPrimary: {
     flex: 1,
@@ -105,3 +118,13 @@ export const ui = StyleSheet.create({
 
 export const PHONE_LENGTH = 11;
 export const PHONE_PATTERN = /^\d{11}$/;
+export const ID_LENGTH = 18;
+export const ID_PATTERN = /^\d{17}[\dX]$/;
+
+export function sanitizePhone(text: string): string {
+  return text.replace(/\D/g, '').slice(0, PHONE_LENGTH);
+}
+
+export function sanitizeIdCard(text: string): string {
+  return text.toUpperCase().replace(/[^0-9X]/g, '').slice(0, ID_LENGTH);
+}
