@@ -126,8 +126,8 @@ export default function QueryScreen() {
           keyboardDismissMode="on-drag"
         >
           <View style={styles.header}>
-            <Text style={styles.title}>查询工具</Text>
-            <Text style={styles.subtitle}>输入内容，实时获取接口返回</Text>
+            <Text style={styles.title}>综合查询</Text>
+            <Text style={styles.subtitle}>词缀-情报局</Text>
           </View>
 
           <View style={styles.card}>
