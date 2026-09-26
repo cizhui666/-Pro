@@ -8,7 +8,7 @@
     "scheme": "cxgj",
     "userInterfaceStyle": "light",
     "ios": {
-      "bundleIdentifier": "com.cxgj.query",
+      "bundleIdentifier": "cishe.tool",
       "supportsTablet": true,
       "buildNumber": "1",
       "config": {
@@ -22,7 +22,7 @@
       }
     },
     "android": {
-      "package": "com.cxgj.query",
+      "package": "cishe.tool",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
