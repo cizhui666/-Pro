@@ -56,6 +56,7 @@ jobs:
       - name: Archive without code signing
         run: |
           set -o pipefail
+          set +e
           xcodebuild archive \
             -workspace "ios/${{ steps.xcode.outputs.workspace }}" \
             -scheme "${{ steps.xcode.outputs.scheme }}" \
@@ -67,7 +68,30 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
-            PROVISIONING_PROFILE_SPECIFIER=""
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            > "$RUNNER_TEMP/xcodebuild.log" 2>&1
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "::group::error lines"
+            grep -nE "(^|[^a-z])error:|fatal error|clang: error|Error:" "$RUNNER_TEMP/xcodebuild.log" | tail -60 || true
+            echo "::endgroup::"
+            echo "::group::last 80 lines"
+            tail -n 80 "$RUNNER_TEMP/xcodebuild.log"
+            echo "::endgroup::"
+          else
+            tail -n 5 "$RUNNER_TEMP/xcodebuild.log"
+          fi
+          exit $status
+
+      - name: Upload xcodebuild log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: ${{ runner.temp }}/xcodebuild.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Package IPA
         run: |
