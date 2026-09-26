@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "main": "expo-router/entry",
   "dependencies": {
+    "crypto-js": "^4.2.0",
     "expo": "~55.0.31",
     "expo-clipboard": "~55.0.17",
     "expo-constants": "~55.0.17",
@@ -19,6 +20,7 @@
     "react-native-web": "^0.21.2"
   },
   "devDependencies": {
+    "@types/crypto-js": "^4.2.2",
     "@types/react": "~19.2.2",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~55.0.1",

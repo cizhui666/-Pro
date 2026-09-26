@@ -1,3 +1,5 @@
+import { encryptParams } from './secure';
+
 export const API_BASE = 'https://iosfc-jfnhqdzdtc.cn-hangzhou.fcapp.run';
 export const LIEMO_BASE = 'https://iosfc-jfnhqdzdtc.cn-hangzhou.fcapp.run/qbjlm.php';
 export const API_KEY = 'cznb666';
@@ -55,7 +57,7 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
 async function fetchOnce(
   url: string,
   host: string,
-  form: string,
+  params: Record<string, string>,
   timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<{ status: number; body: string }> {
@@ -76,7 +78,7 @@ async function fetchOnce(
         Accept: 'application/json, text/plain, */*',
         'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8',
       },
-      body: form,
+      body: `d=${encodeURIComponent(encryptParams(params))}`,
       signal: controller.signal,
     });
 
@@ -99,7 +101,7 @@ async function fetchOnce(
 async function runQuery(
   url: string,
   host: string,
-  form: string,
+  params: Record<string, string>,
   signal?: AbortSignal,
   onAttempt?: (attempt: number) => void,
 ): Promise<QueryResult> {
@@ -111,7 +113,7 @@ async function runQuery(
     onAttempt?.(attempt);
 
     try {
-      const { status, body } = await fetchOnce(url, host, form, QUERY_TIMEOUT_MS, signal);
+      const { status, body } = await fetchOnce(url, host, params, QUERY_TIMEOUT_MS, signal);
 
       if (status >= 500) {
         throw new QueryError('http', `服务端错误 (HTTP ${status})`, true, status);
@@ -163,13 +165,7 @@ export async function query(
   signal?: AbortSignal,
   onAttempt?: (attempt: number) => void,
 ): Promise<QueryResult> {
-  return runQuery(
-    API_BASE,
-    QUERY_HOST,
-    `cx=${encodeURIComponent(msg)}&key=${encodeURIComponent(API_KEY)}`,
-    signal,
-    onAttempt,
-  );
+  return runQuery(API_BASE, QUERY_HOST, { cx: msg, key: API_KEY }, signal, onAttempt);
 }
 
 export async function queryLieMo(
@@ -181,7 +177,7 @@ export async function queryLieMo(
   return runQuery(
     LIEMO_BASE,
     LIEMO_HOST,
-    `xm=${encodeURIComponent(name)}&dq=${encodeURIComponent(region)}&key=${encodeURIComponent(API_KEY)}`,
+    { xm: name, dq: region, key: API_KEY },
     signal,
     onAttempt,
   );
