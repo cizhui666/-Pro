@@ -112,7 +112,8 @@ export async function query(
       }
       if (!responseOk(status)) {
         const detail = errorText(body);
-        throw new QueryError('http', detail || `接口返回错误 (HTTP ${status})`, false, status);
+        const transient = status === 403 && /：\s*$/.test(detail);
+        throw new QueryError('http', detail || `接口返回错误 (HTTP ${status})`, transient, status);
       }
 
       const raw = body.trim();
