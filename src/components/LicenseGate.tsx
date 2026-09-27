@@ -38,6 +38,10 @@ function formatDate(unixSeconds: number): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+function noop() {
+  // 授权门不接受关闭手势（Android 返回键、遮罩点击都无效）。
+}
+
 function describe(vip: number, kmtype: string): string {
   if (kmtype === 'longuse') return '永久有效';
   const label = TYPE_LABELS[kmtype] ?? '卡密';
@@ -116,61 +120,72 @@ export function LicenseGate({ children }: { children: ReactNode }) {
     return <>{children}</>;
   }
 
+  // 恢复已存卡密期间不弹窗：此时 children 还没渲染，半透明遮罩只会盖住空背景。
+  // 用中性加载页过渡，弹窗只负责「输入卡密」这一件事。
+  if (checking) {
+    return (
+      <View style={styles.loading}>
+        <ActivityIndicator color="#2563EB" size="large" />
+        <Text style={styles.loadingText}>正在验证卡密…</Text>
+      </View>
+    );
+  }
+
+  // 授权门必须不可关闭：背景点击与 Android 返回键都不放行。
+  // 真正的数据访问由 FC 逐次鉴权兜底，这里只是入口体验。
   return (
-    <Modal visible animationType="fade" transparent={false}>
+    <Modal
+      visible
+      transparent
+      animationType="fade"
+      statusBarTranslucent
+      onRequestClose={noop}
+    >
       <KeyboardAvoidingView
-        style={styles.wrap}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.backdrop}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <View style={styles.panel}>
           <Text style={styles.title}>词社</Text>
           <Text style={styles.subtitle}>请输入卡密后使用</Text>
 
-          {checking ? (
-            <View style={styles.stateBox}>
-              <ActivityIndicator color="#2563EB" />
-              <Text style={styles.stateText}>正在验证卡密…</Text>
-            </View>
-          ) : (
-            <>
-              <TextInput
-                value={card}
-                onChangeText={(text) => {
-                  setCard(text);
-                  if (error) setError('');
-                }}
-                placeholder="请输入卡密"
-                placeholderTextColor="#94A3B8"
-                autoCapitalize="none"
-                autoCorrect={false}
-                style={styles.input}
-                returnKeyType="go"
-                onSubmitEditing={submit}
-                editable={!busy}
-              />
+          <TextInput
+            value={card}
+            onChangeText={(text) => {
+              setCard(text);
+              if (error) setError('');
+            }}
+            placeholder="请输入卡密"
+            placeholderTextColor="#94A3B8"
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoFocus
+            style={styles.input}
+            returnKeyType="go"
+            onSubmitEditing={submit}
+            editable={!busy}
+          />
 
-              {summary ? <Text style={styles.ok}>{summary}</Text> : null}
-              {error ? <Text style={styles.error}>{error}</Text> : null}
+          {summary ? <Text style={styles.ok}>{summary}</Text> : null}
+          {error ? <Text style={styles.error}>{error}</Text> : null}
 
-              <Pressable
-                onPress={submit}
-                disabled={busy}
-                style={({ pressed }) => [
-                  styles.btn,
-                  busy && styles.btnDisabled,
-                  pressed && styles.pressed,
-                ]}
-              >
-                {busy ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.btnText}>验证并进入</Text>
-                )}
-              </Pressable>
+          <Pressable
+            onPress={submit}
+            disabled={busy}
+            style={({ pressed }) => [
+              styles.btn,
+              busy && styles.btnDisabled,
+              pressed && styles.pressed,
+            ]}
+          >
+            {busy ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.btnText}>验证并进入</Text>
+            )}
+          </Pressable>
 
-              <Text style={styles.hint}>卡密与本机设备绑定，一机一码</Text>
-            </>
-          )}
+          <Text style={styles.hint}>卡密与本机设备绑定，一机一码</Text>
         </View>
       </KeyboardAvoidingView>
     </Modal>
@@ -178,12 +193,35 @@ export function LicenseGate({ children }: { children: ReactNode }) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: '#F1F4F9', justifyContent: 'center' },
-  panel: { margin: 24, padding: 24, borderRadius: 20, backgroundColor: '#FFFFFF' },
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.55)',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  panel: {
+    width: '100%',
+    maxWidth: 420,
+    alignSelf: 'center',
+    padding: 24,
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.25,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 12,
+  },
   title: { fontSize: 26, fontWeight: '700', color: '#0F172A' },
   subtitle: { fontSize: 14, color: '#64748B', marginTop: 6, marginBottom: 20 },
-  stateBox: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12 },
-  stateText: { fontSize: 15, color: '#475569' },
+  loading: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    backgroundColor: '#F1F4F9',
+  },
+  loadingText: { fontSize: 15, color: '#475569' },
   input: {
     height: 52,
     fontSize: 17,
