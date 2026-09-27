@@ -101,7 +101,12 @@ export function LicenseGate({ children }: { children: ReactNode }) {
       setSummary(describe(info.vip, info.kmtype));
       setLicensed(true);
     } catch (e) {
-      setError(e instanceof LicenseError ? e.message : '验证失败，请重试');
+      // 兜底不得吞掉真实异常，否则线上问题无法定位。
+      setError(
+        e instanceof LicenseError
+          ? e.message
+          : `验证失败，请重试（${e instanceof Error ? e.message : String(e)}）`,
+      );
     } finally {
       setBusy(false);
     }

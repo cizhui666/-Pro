@@ -152,7 +152,12 @@ export async function verifyCard(card: string): Promise<LicenseState> {
     throw new LicenseError('验证失败');
   }
 
-  await AsyncStorage.setItem(CARD_STORAGE_KEY, trimmed);
+  // 持久化只是便利功能，不应因为存储失败（磁盘满、key 异常等）而拦住已通过校验的卡密。
+  try {
+    await AsyncStorage.setItem(CARD_STORAGE_KEY, trimmed);
+  } catch {
+    // 忽略：本次会话内 state 已可用
+  }
   restored = true;
   state = {
     card: trimmed,
