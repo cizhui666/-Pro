@@ -758,8 +758,17 @@ module.exports = {
   WEIYAN_RC4KEY,
 };
 
+// 仅在使用自定义运行时（自己起 HTTP Server）时生效；
+// 使用内置 Node.js 运行时则由平台调用 module.exports.handler。
 if (require.main === module) {
-  const PORT = envInt('FC_PORT', envInt('PORT', 9000));
+  // 自定义运行时会注入 PORT；CAPort 是控制台的监听端口配置。
+  const PORT = envInt('CAPort', envInt('FC_PORT', envInt('PORT', 9000)));
+  // 函数计算要求监听 0.0.0.0，写 127.0.0.1 会导致健康检查失败。
+  // 超时设为 0：单次请求可能长达 15 秒（上游超时），不能被 Server 默认值截断。
+  server.timeout = 0;
+  server.keepAliveTimeout = 0;
+  server.headersTimeout = 0;
+  server.requestTimeout = 0;
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`listening on ${PORT}`);
   });
