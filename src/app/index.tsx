@@ -8,7 +8,7 @@ export default function HomeScreen() {
       <View style={styles.content}>
         <View style={styles.header}>
           <Text style={styles.title}>词社</Text>
-          <Text style={styles.subtitle}>词缀-情报局</Text>
+          <Text style={styles.subtitle}>词缀-综合</Text>
         </View>
 
         <Pressable
@@ -16,7 +16,7 @@ export default function HomeScreen() {
           style={({ pressed }) => [styles.card, styles.action, pressed && styles.pressed]}
         >
           <View style={styles.actionBody}>
-            <Text style={styles.actionTitle}>情报局综合</Text>
+            <Text style={styles.actionTitle}>词缀综合</Text>
             <Text style={styles.actionDesc}>综合查询</Text>
           </View>
           <Text style={styles.chevron}>›</Text>

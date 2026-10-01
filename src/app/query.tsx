@@ -58,7 +58,7 @@ export default function QueryScreen() {
               <Text style={ui.backText}>‹ 返回</Text>
             </Pressable>
             <Text style={ui.title}>综合查询</Text>
-            <Text style={ui.subtitle}>词缀-情报局</Text>
+            <Text style={ui.subtitle}>词缀-综合</Text>
           </View>
 
           <View style={ui.card}>
