@@ -426,10 +426,9 @@ function guardSlots() {
 }
 
 function guardIp(req) {
-  const raw = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown')
-    .toString()
-    .split(',')[0]
-    .trim();
+  // 与 PHP 版 REMOTE_ADDR 的口径一致：只信平台给出的来源 IP。
+  // x-forwarded-for 客户端可伪造，若采信则限流可被绕过。
+  const raw = clientIp(req).split(',')[0].trim();
   return raw.replace(/[^0-9a-zA-Z.:_-]/g, '');
 }
 
@@ -545,7 +544,15 @@ function requireLicense(req) {
 function readBody(req) {
   return new Promise((resolve) => {
     if (req.body !== undefined && req.body !== null) {
-      resolve(typeof req.body === 'string' ? req.body : JSON.stringify(req.body));
+      if (Buffer.isBuffer(req.body)) {
+        resolve(req.body.toString('utf8'));
+        return;
+      }
+      if (typeof req.body === 'string') {
+        resolve(req.body);
+        return;
+      }
+      resolve(JSON.stringify(req.body));
       return;
     }
     const chunks = [];
@@ -563,18 +570,45 @@ function readBody(req) {
   });
 }
 
+// 函数计算有两种运行时会共用同一个入口：
+//   1) 内置 Node.js 运行时 -> resp.setStatusCode()/setHeader()/send()
+//   2) 自定义运行时        -> 标准 http.ServerResponse.writeHead()/end()
+// 这里同时兼容两种响应对象，避免因运行时切换而 500。
 function reply(res, status, contentType, payload) {
+  const body = typeof payload === 'string' ? payload : String(payload);
+  if (typeof res.send === 'function') {
+    res.setStatusCode(status);
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(body);
+    return;
+  }
   res.writeHead(status, { 'Content-Type': contentType, 'Cache-Control': 'no-store' });
-  res.end(payload);
+  res.end(body);
 }
 
 const fail = (res, code, message) => reply(res, code, 'text/plain; charset=utf-8', message);
 const jsonOut = (res, code, obj) =>
   reply(res, code, 'application/json; charset=utf-8', JSON.stringify(obj));
 
+// 内置运行时提供 request.path / request.method / request.body / request.clientIP；
+// 自定义运行时提供标准 IncomingMessage。统一成一份取值逻辑。
+function requestPath(req) {
+  if (typeof req.path === 'string' && req.path !== '') return req.path;
+  return url.parse(req.url || '/', true).pathname || '/';
+}
+
+// 函数计算把真实来源 IP 放在 clientIP（内置运行时）或 socket（自定义运行时）里。
+// 不信任客户端可伪造的 x-forwarded-for。
+function clientIp(req) {
+  if (typeof req.clientIP === 'string' && req.clientIP !== '') return req.clientIP;
+  const sock = req.socket || (req.connection || null);
+  const addr = sock && sock.remoteAddress;
+  return typeof addr === 'string' && addr !== '' ? addr : 'unknown';
+}
+
 async function handle(req, res) {
-  const parsed = url.parse(req.url, true);
-  const pathname = parsed.pathname || '/';
+  const pathname = requestPath(req);
 
   const raw = await readBody(req);
   if (!raw) return fail(res, 400, '缺少加密参数');
@@ -617,7 +651,12 @@ async function handle(req, res) {
   } catch {
     return fail(res, 400, '解密失败');
   }
-  if (!data || typeof data !== 'object' || !Array.isArray(data.p)) {
+  // p 必须是普通对象（App 发送的是 {card, markcode}），
+  // 不能是数组/null，否则后续参数取值会得到错误结果。
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return fail(res, 400, '解密失败');
+  }
+  if (!data.p || typeof data.p !== 'object' || Array.isArray(data.p)) {
     return fail(res, 400, '解密失败');
   }
   if (Math.abs(Math.floor(Date.now() / 1000) - Number(data.t)) > PAYLOAD_MAX_AGE) {
@@ -674,33 +713,34 @@ async function handle(req, res) {
     });
   }
 
+// qbjzh.php 与 qbjlm.php 已删除，查询后端不再提供。
+  // 鉴权通过后一律 410；注意必须显式 return，否则请求会挂住不返回任何响应。
   const gate = requireLicense(req);
   if (gate.error) return fail(res, gate.error[0], gate.error[1]);
-  if (!gate.pending) return null; // 命中缓存，鉴权通过
-
-  const [kami, markcode] = gate.pending;
-  const result = await weiyanLogin(kami, markcode);
-  if (!result.ok) return fail(res, 424, result.message);
-  if (Number(result.code) !== WEIYAN_OK_CODE) return fail(res, 402, result.message);
-
-  // qbjzh.php 与 qbjlm.php 已删除，查询后端不再提供。
   return fail(res, 410, '查询接口已下线');
 }
 
-const server = http.createServer((req, res) => {
-  handle(req, res).catch((e) => {
+// 仅在使用自定义运行时（自己起 HTTP Server）时才需要监听。
+const server = http.createServer(handler);
+
+// 函数计算 Node.js 内置运行时的入口方法名必须是 handler（配置为 index.handler）。
+// 第三个参数 context 在内置运行时是运行上下文，自定义运行时不存在，均不使用。
+async function handler(req, res) {
+  try {
+    await handle(req, res);
+  } catch (e) {
     console.error('unhandled', e && e.stack ? e.stack : e);
     try {
       fail(res, 500, '服务器内部错误');
     } catch {
       /* 响应已发出 */
     }
-  });
-});
+  }
+}
 
-// 函数计算需要监听 PORT 环境变量指定的端口。
-// 仅在直接运行时监听；被 require 时只导出函数，便于与 PHP 版做逐字节差分测试。
+// 其余成员供与 PHP 版做逐字节差分测试时 require 使用。
 module.exports = {
+  handler,
   handle,
   rc4,
   rc4Hex,
