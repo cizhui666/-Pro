@@ -20,6 +20,22 @@ import { useQueryRunner } from '../lib/useQuery';
 export default function LieMoQueryScreen() {
   const [region, setRegion] = useState('');
 
+  // 姓名和地区要支持中文，这里必须让原生输入框自己持有文本，不能回写 value。
+  //
+  // React Native 的 TextInput 是受控组件：只要传了 value，原生文本就会被强制
+  // 对齐到它。拼音输入法在组合过程中会通过 onChangeText 送出 marked text
+  // （peng、xi'an 之类），一旦把这个中间态写回 value，原生的组合区就被重置、
+  // 候选窗随之消失，输入法会把已输入的音节当作已上屏并送出回车，于是打
+  // 「peng」到第二个字母就被提交。
+  //
+  // 所以这里只单向读取：onChangeText 更新 state 用于计数和提交，不传 value。
+  // RN 0.83 已经移除了 onCompositionStart/onCompositionEnd，无法在组合期间
+  // 精确识别，非受控是目前唯一可靠的做法。
+  // 需要程序化改写输入框内容时（清空按钮、历史回填）用 key 重新挂载，
+  // 让 defaultValue 重新生效。
+  const [nameEpoch, bumpNameEpoch] = useState(0);
+  const [regionEpoch, bumpRegionEpoch] = useState(0);
+
   const submitFn = useCallback(
     (name: string, signal: AbortSignal, onAttempt: (attempt: number) => void) =>
       queryLieMo(name, region, signal, onAttempt),
@@ -54,6 +70,23 @@ export default function LieMoQueryScreen() {
     submit();
   };
 
+  // 历史回填：state 走pick，界面靠重新挂载同步到输入框。
+  const onPick = useCallback(
+    (value: string) => {
+      setKeyword(value);
+      bumpNameEpoch((n) => n + 1);
+      pick(value);
+    },
+    [bumpNameEpoch, pick, setKeyword],
+  );
+
+  const onClear = useCallback(() => {
+    setKeyword('');
+    setRegion('');
+    bumpNameEpoch((n) => n + 1);
+    bumpRegionEpoch((n) => n + 1);
+  }, [bumpNameEpoch, bumpRegionEpoch, setKeyword]);
+
   const canSubmit = keyword.length > 0 && !loading;
 
   return (
@@ -83,8 +116,9 @@ export default function LieMoQueryScreen() {
           <View style={ui.card}>
             <Text style={ui.label}>姓名</Text>
             <TextInput
+              key={`name-${nameEpoch}`}
               style={ui.singleInput}
-              value={keyword}
+              defaultValue={keyword}
               onChangeText={(text) => setKeyword(sanitizeName(text))}
               placeholder="请输入姓名"
               placeholderTextColor="#9AA3B2"
@@ -100,8 +134,9 @@ export default function LieMoQueryScreen() {
 
             <Text style={[ui.label, ui.labelSpaced]}>地区（选填）</Text>
             <TextInput
+              key={`region-${regionEpoch}`}
               style={ui.singleInput}
-              value={region}
+              defaultValue={region}
               onChangeText={(text) => setRegion(sanitizeRegion(text))}
               placeholder="如：北京，留空查全部"
               placeholderTextColor="#9AA3B2"
@@ -115,10 +150,7 @@ export default function LieMoQueryScreen() {
 
             <View style={ui.row}>
               <Pressable
-                onPress={() => {
-                  setKeyword('');
-                  setRegion('');
-                }}
+                onPress={onClear}
                 disabled={(!keyword && !region) || loading}
                 style={({ pressed }) => [
                   ui.btnGhost,
@@ -161,7 +193,7 @@ export default function LieMoQueryScreen() {
           ) : null}
 
           {history.length > 0 ? (
-            <HistoryCard items={history} onPick={pick} onClear={clearHistory} />
+            <HistoryCard items={history} onPick={onPick} onClear={clearHistory} />
           ) : null}
         </ScrollView>
       </KeyboardAvoidingView>
