@@ -2,12 +2,15 @@ import { encryptParams } from './secure';
 import { invalidateLicense, requireLicenseParams } from './license';
 
 export const API_BASE = 'https://iosfc-jfnhqdzdtc.cn-hangzhou.fcapp.run';
-export const LIEMO_BASE = 'https://iosfc-jfnhqdzdtc.cn-hangzhou.fcapp.run/qbjlm.php';
-export const API_KEY = 'cznb666';
-export const QUERY_HOST = new URL(API_BASE).host;
-export const LIEMO_HOST = new URL(LIEMO_BASE).host;
+export const QUERY_PATH = '/czsgk.php';
+export const LIEMO_PATH = '/czlm.php';
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_MAX_ATTEMPTS = 3;
+
+type QueryRequest = {
+  path: string;
+  params: Record<string, string>;
+};
 
 export type QueryResult = {
   text: string;
@@ -56,9 +59,7 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 async function fetchOnce(
-  url: string,
-  host: string,
-  params: Record<string, string>,
+  request: QueryRequest,
   timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<{ status: number; body: string }> {
@@ -73,13 +74,13 @@ async function fetchOnce(
   }, timeoutMs);
 
   try {
-    const response = await fetch(url, {
+    const response = await fetch(`${API_BASE}${request.path}`, {
       method: 'POST',
       headers: {
         Accept: 'application/json, text/plain, */*',
         'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8',
       },
-      body: `d=${encodeURIComponent(encryptParams(params))}`,
+      body: `d=${encodeURIComponent(encryptParams(request.params))}`,
       signal: controller.signal,
     });
 
@@ -92,7 +93,7 @@ async function fetchOnce(
     if (timedOut) {
       throw new QueryError('timeout', `接口超时（${Math.round(timeoutMs / 1000)} 秒无响应）`, true);
     }
-    throw new QueryError('network', `连接 ${host} 失败，请检查网络`, true);
+    throw new QueryError('network', `连接 ${new URL(API_BASE).host} 失败，请检查网络`, true);
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener('abort', onAbort);
@@ -100,9 +101,7 @@ async function fetchOnce(
 }
 
 async function runQuery(
-  url: string,
-  host: string,
-  params: Record<string, string>,
+  request: QueryRequest,
   signal?: AbortSignal,
   onAttempt?: (attempt: number) => void,
 ): Promise<QueryResult> {
@@ -114,7 +113,7 @@ async function runQuery(
     onAttempt?.(attempt);
 
     try {
-      const { status, body } = await fetchOnce(url, host, params, QUERY_TIMEOUT_MS, signal);
+      const { status, body } = await fetchOnce(request, QUERY_TIMEOUT_MS, signal);
 
       if (status === 402) {
         invalidateLicense();
@@ -174,9 +173,10 @@ export async function query(
 ): Promise<QueryResult> {
   const license = await requireLicenseParams();
   return runQuery(
-    API_BASE,
-    QUERY_HOST,
-    { cx: msg, key: API_KEY, card: license.card, markcode: license.markcode },
+    {
+      path: QUERY_PATH,
+      params: { cx: msg, card: license.card, markcode: license.markcode },
+    },
     signal,
     onAttempt,
   );
@@ -190,14 +190,9 @@ export async function queryLieMo(
 ): Promise<QueryResult> {
   const license = await requireLicenseParams();
   return runQuery(
-    LIEMO_BASE,
-    LIEMO_HOST,
     {
-      xm: name,
-      dq: region,
-      key: API_KEY,
-      card: license.card,
-      markcode: license.markcode,
+      path: LIEMO_PATH,
+      params: { xm: name, dq: region, card: license.card, markcode: license.markcode },
     },
     signal,
     onAttempt,

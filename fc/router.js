@@ -41,6 +41,10 @@ const FC_RATE_MAX = envInt('FC_RATE_MAX', 60);
 const FC_RATE_DISTINCT = envInt('FC_RATE_DISTINCT', 10);
 const FC_CACHE_DIR = envStr('FC_CACHE_DIR', '/tmp/fc_guard');
 
+// 查询上游配置已移除。czsgk/czlm 走第三方泄露库且不校验号码归属，
+// 不能作为 App 后端对外提供；相关常量与请求逻辑一并删除，避免误开启。
+// 若要恢复为「仅可自查」，须先实现对被查号码的服务端所有权校验。
+
 const ENC_KEY = crypto.createHash('sha256').update(`${PAYLOAD_SECRET}|enc`).digest();
 const MAC_KEY = crypto.createHash('sha256').update(`${PAYLOAD_SECRET}|mac`).digest();
 
@@ -571,6 +575,35 @@ function requireLicense(req) {
   return { pending: [kami, markcode, cachePath] };
 }
 
+// /login 与查询路由共用：命中缓存就直接放行，未命中才回调威言校验一次。
+async function resolveLicense(req) {
+  const gate = requireLicense(req);
+  if (gate.error) return { error: gate.error };
+  if (!gate.pending) return { result: gate.result };
+
+  const [kami, markcode, cachePath] = gate.pending;
+  const result = await weiyanLogin(kami, markcode);
+  if (!result.ok) return { error: [424, result.message] };
+  if (Number(result.code) !== WEIYAN_OK_CODE) return { error: [402, result.message] };
+
+  if (cachePath !== '' && result.vip > Date.now() / 1000) {
+    try {
+      fs.writeFileSync(
+        cachePath,
+        JSON.stringify({
+          vip: result.vip,
+          ktype: result.ktype,
+          kmtype: result.kmtype,
+          at: Math.floor(Date.now() / 1000),
+        }),
+      );
+    } catch (e) {
+      /* 缓存失败不影响本次校验结果 */
+    }
+  }
+  return { result };
+}
+
 function readBody(req) {
   return new Promise((resolve) => {
     if (req.body !== undefined && req.body !== null) {
@@ -702,53 +735,26 @@ async function handle(req, res) {
   req.params = params;
 
   if (pathname === '/login') {
-    const gate = requireLicense(req);
-    if (gate.error) return fail(res, gate.error[0], gate.error[1]);
-    if (!gate.pending) {
-      return jsonOut(res, 200, {
-        ok: true,
-        vip: gate.result.vip,
-        ktype: gate.result.ktype,
-        kmtype: gate.result.kmtype,
-      });
-    }
-
-    const [kami, markcode, cachePath] = gate.pending;
-    const result = await weiyanLogin(kami, markcode);
-    if (!result.ok) return fail(res, 424, result.message);
-    if (Number(result.code) !== WEIYAN_OK_CODE) return fail(res, 402, result.message);
-
-    if (cachePath !== '' && result.vip > Date.now() / 1000) {
-      try {
-        fs.writeFileSync(
-          cachePath,
-          JSON.stringify({
-            vip: result.vip,
-            ktype: result.ktype,
-            kmtype: result.kmtype,
-            at: Math.floor(Date.now() / 1000),
-          }),
-        );
-      } catch (e) {
-        /* 缓存失败不影响本次校验结果 */
-      }
-    }
+    const lic = await resolveLicense(req);
+    if (lic.error) return fail(res, lic.error[0], lic.error[1]);
     delete req.params.card;
     delete req.params.markcode;
     return jsonOut(res, 200, {
       ok: true,
-      vip: result.vip,
-      ktype: result.ktype,
-      kmtype: result.kmtype,
+      vip: lic.result.vip,
+      ktype: lic.result.ktype,
+      kmtype: lic.result.kmtype,
     });
   }
 
-// qbjzh.php 与 qbjlm.php 已删除，查询后端不再提供。
-  // 鉴权通过后一律 410；注意必须显式 return，否则请求会挂住不返回任何响应。
-  const gate = requireLicense(req);
-  if (gate.error) return fail(res, gate.error[0], gate.error[1]);
+  // 查询路由已下线。
+  // cizhui.j3.ink 的 czsgk/czlm 接口接受任意手机号、身份证、QQ 并返回第三方
+  // 泄露记录，且不校验号码归属，因此不作为 App 后端对外提供。
+  // 如需恢复为「仅可自查」，必须先在服务端实现对被查号码的所有权校验
+  // （例如短信验证码），再放开此分支。
   return fail(res, 410, '查询接口已下线');
 }
+
 
 // 仅在使用自定义运行时（自己起 HTTP Server）时才需要监听。
 const server = http.createServer(handler);
