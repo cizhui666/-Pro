@@ -41,9 +41,20 @@ const FC_RATE_MAX = envInt('FC_RATE_MAX', 60);
 const FC_RATE_DISTINCT = envInt('FC_RATE_DISTINCT', 10);
 const FC_CACHE_DIR = envStr('FC_CACHE_DIR', '/tmp/fc_guard');
 
-// 查询上游配置已移除。czsgk/czlm 走第三方泄露库且不校验号码归属，
-// 不能作为 App 后端对外提供；相关常量与请求逻辑一并删除，避免误开启。
-// 若要恢复为「仅可自查」，须先实现对被查号码的服务端所有权校验。
+// 查询上游：词缀库。key 只存在于服务端，App 不持有也不再下发。
+// 默认路径已按 App 端 encodeURI(...) 的结果写成百分号编码（社工 = %E7%A4%BE%E5%B7%A5），
+// http.request 不接受非 ASCII 路径，自定义 FC_CIZHUI_ROOT 时也必须给编码后的值。
+const CIZHUI_ROOT = envStr('FC_CIZHUI_ROOT', 'https://cizhui.j3.ink/%E7%A4%BE%E5%B7%A5/');
+const CIZHUI_KEY = envStr('FC_CIZHUI_KEY', 'cznb666');
+const CIZHUI_TIMEOUT_MS = envInt('FC_CIZHUI_TIMEOUT_MS', 25000);
+const CIZHUI_MAX_REDIRECTS = envInt('FC_CIZHUI_MAX_REDIRECTS', 3);
+// 上游命中记录可能很大，留 4MB 上限防止极端响应拖垮实例内存。
+const CIZHUI_MAX_BODY = envInt('FC_CIZHUI_MAX_BODY', 4 * 1024 * 1024);
+
+// 入参白名单与长度上限。cx 是综合查询的关键字，其余为猎魔的姓名/地区。
+const CX_MAX_LEN = 500;
+const XM_MAX_LEN = 64;
+const DQ_MAX_LEN = 64;
 
 const ENC_KEY = crypto.createHash('sha256').update(`${PAYLOAD_SECRET}|enc`).digest();
 const MAC_KEY = crypto.createHash('sha256').update(`${PAYLOAD_SECRET}|mac`).digest();
@@ -353,6 +364,101 @@ function requestUpstream(endpoint, data) {
       resolve({ body: '', status: 0, err: `timeout after ${UPSTREAM_TIMEOUT_MS}ms` });
     });
     req.on('error', (e) => resolve({ body: '', status: 0, err: e.message }));
+    req.end();
+  });
+}
+
+// 查询串手工拼，不依赖 URLSearchParams 的编码细节，
+// 这样与 PHP 版可以逐字节对拍出同一个 URL。
+function buildCizhuiUrl(name, params) {
+  const base = /\/$/.test(CIZHUI_ROOT) ? CIZHUI_ROOT : `${CIZHUI_ROOT}/`;
+  const qs = [];
+  for (const key of Object.keys(params)) {
+    qs.push(`${key}=${encodeURIComponent(params[key])}`);
+  }
+  qs.push(`key=${encodeURIComponent(CIZHUI_KEY)}`);
+  return `${base}${name}?${qs.join('&')}`;
+}
+
+// 转发查询到词缀库。每跳都重新校验协议，只允许 https，
+// 避免上游用 302 把请求引到明文或内网地址上。
+function requestCizhui(target, redirectsLeft) {
+  return new Promise((resolve) => {
+    let parsed;
+    try {
+      parsed = new URLImpl(target);
+    } catch (e) {
+      resolve({ ok: false, status: 0, body: '', err: '上游地址无效' });
+      return;
+    }
+    if (parsed.protocol !== 'https:') {
+      resolve({ ok: false, status: 0, body: '', err: '上游仅允许 https' });
+      return;
+    }
+    // http.request 遇到非 ASCII 路径会抛 ERR_UNESCAPED_CHARACTERS，
+    // 提前拦下来给出可读原因。
+    if (/[^\x20-\x7e]/.test(`${parsed.pathname}${parsed.search}`)) {
+      resolve({ ok: false, status: 0, body: '', err: '上游路径含未编码字符' });
+      return;
+    }
+
+    const req = https.request(
+      {
+        hostname: parsed.hostname,
+        port: parsed.port || 443,
+        path: `${parsed.pathname}${parsed.search}`,
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0',
+          Accept: 'text/plain, */*',
+          Referer: `https://${parsed.host}/`,
+        },
+        // 证书必须校验通过，不降级到明文。
+        rejectUnauthorized: true,
+        timeout: CIZHUI_TIMEOUT_MS,
+      },
+      (res) => {
+        const status = res.statusCode || 0;
+        if (status >= 300 && status < 400 && res.headers.location) {
+          res.resume();
+          if (redirectsLeft <= 0) {
+            resolve({ ok: false, status, body: '', err: '重定向次数过多' });
+            return;
+          }
+          let next;
+          try {
+            next = new URLImpl(res.headers.location, parsed).toString();
+          } catch (e) {
+            resolve({ ok: false, status, body: '', err: '重定向地址无效' });
+            return;
+          }
+          resolve(requestCizhui(next, redirectsLeft - 1));
+          return;
+        }
+
+        const chunks = [];
+        let size = 0;
+        res.on('data', (c) => {
+          size += c.length;
+          if (size > CIZHUI_MAX_BODY) {
+            req.destroy();
+            resolve({ ok: false, status, body: '', err: '上游响应过大' });
+            return;
+          }
+          chunks.push(c);
+        });
+        res.on('end', () =>
+          resolve({ ok: true, status, body: Buffer.concat(chunks).toString('utf8'), err: '' }),
+        );
+        res.on('error', (e) => resolve({ ok: false, status, body: '', err: e.message }));
+      },
+    );
+
+    req.on('timeout', () => {
+      req.destroy();
+      resolve({ ok: false, status: 0, body: '', err: `上游超时 ${CIZHUI_TIMEOUT_MS}ms` });
+    });
+    req.on('error', (e) => resolve({ ok: false, status: 0, body: '', err: e.message }));
     req.end();
   });
 }
@@ -747,12 +853,46 @@ async function handle(req, res) {
     });
   }
 
-  // 查询路由已下线。
-  // cizhui.j3.ink 的 czsgk/czlm 接口接受任意手机号、身份证、QQ 并返回第三方
-  // 泄露记录，且不校验号码归属，因此不作为 App 后端对外提供。
-  // 如需恢复为「仅可自查」，必须先在服务端实现对被查号码的所有权校验
-  // （例如短信验证码），再放开此分支。
-  return fail(res, 410, '查询接口已下线');
+  // 查询路由：综合查询与猎魔。
+  // 先按白名单校验入参，再校验卡密，最后才转发；
+  // 转发时只拼白名单里的字段，card/markcode 不会带给上游。
+  if (pathname === '/czsgk.php' || pathname === '/czlm.php') {
+    const cx = String(req.params.cx || '').trim();
+    const xm = String(req.params.xm || '').trim();
+    const dq = String(req.params.dq || '').trim();
+
+    if (pathname === '/czsgk.php') {
+      if (cx === '') return fail(res, 400, '缺少cx参数');
+      if (cx.length > CX_MAX_LEN) return fail(res, 400, `cx长度不能超过${CX_MAX_LEN}`);
+    } else {
+      // dq 可空，空或省略都按「地区筛选：不限」处理。
+      if (xm === '') return fail(res, 400, '缺少xm参数');
+      if (xm.length > XM_MAX_LEN) return fail(res, 400, `xm长度不能超过${XM_MAX_LEN}`);
+      if (dq.length > DQ_MAX_LEN) return fail(res, 400, `dq长度不能超过${DQ_MAX_LEN}`);
+    }
+
+    const lic = await resolveLicense(req);
+    if (lic.error) return fail(res, lic.error[0], lic.error[1]);
+
+    const target =
+      pathname === '/czsgk.php'
+        ? buildCizhuiUrl('czsgk.php', { cx })
+        : buildCizhuiUrl('czlm.php', { xm, dq });
+
+    const upstream = await requestCizhui(target, CIZHUI_MAX_REDIRECTS);
+    if (!upstream.ok) return fail(res, 502, `上游请求失败：${upstream.err}`);
+    // 上游明确拒绝查询时原样透传，App 侧不重试；
+    // 其余非 2xx 一律按网关故障处理，App 侧可重试。
+    if (upstream.status === 400 || upstream.status === 403) {
+      return fail(res, upstream.status, upstream.body || '上游拒绝查询');
+    }
+    if (upstream.status < 200 || upstream.status >= 300) {
+      return fail(res, 502, `上游返回 ${upstream.status}`);
+    }
+    return reply(res, 200, 'text/plain; charset=utf-8', upstream.body);
+  }
+
+  return fail(res, 404, '接口不存在');
 }
 
 
@@ -787,11 +927,15 @@ module.exports = {
   md5,
   toUtf8,
   knownMessage,
+  buildCizhuiUrl,
+  requestCizhui,
   ENC_KEY,
   MAC_KEY,
   PAYLOAD_SECRET,
   WEIYAN_APPKEY,
   WEIYAN_RC4KEY,
+  CIZHUI_ROOT,
+  CIZHUI_KEY,
 };
 
 // 仅在使用自定义运行时（自己起 HTTP Server）时生效；
