@@ -1,10 +1,12 @@
 // Node.js 迁移版 router：保留现有加密、鉴权、限流、缓存逻辑
-const crypto = require('node:crypto');
-const http = require('node:http');
-const https = require('node:https');
-const url = require('node:url');
-const fs = require('node:fs');
-const path = require('node:path');
+// 自定义运行时 custom.debian9 自带的 Node 版本较老，不支持 'node:' 前缀
+// （需 Node 14+）。因此这里使用不带前缀的内置模块名，两种运行时都能加载。
+const crypto = require('crypto');
+const http = require('http');
+const https = require('https');
+const url = require('url');
+const fs = require('fs');
+const path = require('path');
 
 function envInt(name, def) {
   const v = process.env[name];
@@ -91,12 +93,17 @@ function rc4Unhex(hex, key) {
   return rc4(Buffer.from(hex, 'hex'), key);
 }
 
-// Node 内置 TextDecoder 支持 gbk/gb18030（full-icu），无需引入 iconv 依赖。
+// 微验 msg 是 GBK 字节，需要 gbk 解码能力。
+// 全局 TextDecoder 需 Node 11+，util.TextDecoder 需 Node 8.3+，且 gbk 编码
+// 依赖 full-icu。老运行时任一条件不满足时降级为不解码（仅影响错误文案可读性）。
 let gbkDecoder = null;
 try {
-  gbkDecoder = new TextDecoder('gbk');
-} catch {
+  // eslint-disable-next-line no-undef
+  const TD = typeof TextDecoder !== 'undefined' ? TextDecoder : require('util').TextDecoder;
+  gbkDecoder = new TD('gbk');
+} catch (e) {
   gbkDecoder = null;
+  console.warn('GBK decoder unavailable, 微验错误文案可能乱码:', e && e.message ? e.message : e);
 }
 
 // 微验 msg 是 GBK 字节而非 UTF-8。只有解码后出现替换字符 U+FFFD 才按 GBK 再解一次，
@@ -107,7 +114,7 @@ function toUtf8(buf) {
   if (gbkDecoder) {
     try {
       return gbkDecoder.decode(buf);
-    } catch {
+    } catch (e) {
       /* 落到原始文本 */
     }
   }
@@ -163,11 +170,11 @@ function parseResponse(body, rc4key) {
     try {
       const p = JSON.parse(text);
       if (p && typeof p === 'object') json = p;
-    } catch {
+    } catch (e) {
       try {
         const p = JSON.parse(toUtf8(plain));
         if (p && typeof p === 'object') json = p;
-      } catch {
+      } catch (e) {
         /* 正则兜底 */
       }
     }
@@ -182,13 +189,23 @@ function parseResponse(body, rc4key) {
     }
 
     if (code !== null) {
+      // 用 exec 循环而非 matchAll：matchAll 需要 Node 12+，
+      // custom.debian9 自带的 Node 版本更老。
+      const collect = (re) => {
+        const out = [];
+        const rx = new RegExp(re.source, re.flags);
+        let m = rx.exec(text);
+        while (m !== null) {
+          out.push(m[1]);
+          m = rx.exec(text);
+        }
+        return out;
+      };
       return {
         code,
-        times: [...text.matchAll(/"time"\s*:\s*(\d+)/g)].map((m) => m[1]),
-        checks: [...text.matchAll(/"check"\s*:\s*"([0-9a-fA-F]{32})"/g)].map((m) =>
-          m[1].toLowerCase(),
-        ),
-        ids: [...text.matchAll(/"id"\s*:\s*(\d+)/g)].map((m) => m[1]),
+        times: collect(/"time"\s*:\s*(\d+)/g),
+        checks: collect(/"check"\s*:\s*"([0-9a-fA-F]{32})"/g).map((s) => s.toLowerCase()),
+        ids: collect(/"id"\s*:\s*(\d+)/g),
         json,
         plain,
         diag: '',
@@ -282,25 +299,34 @@ function normalize(parsed, httpCode) {
   };
 }
 
+// 全局 URL / URLSearchParams 需 Node 10+；老运行时从 url 模块取。
+const urlMod = require('url');
+const URLImpl = typeof URL !== 'undefined' ? URL : urlMod.URL;
+const SearchParamsImpl = typeof URLSearchParams !== 'undefined' ? URLSearchParams : urlMod.URLSearchParams;
+
 function requestUpstream(endpoint, data) {
   return new Promise((resolve) => {
-    const target = new URL(
+    const target = new URLImpl(
       `${endpoint}?id=kmlogon&app=${encodeURIComponent(WEIYAN_APPID)}&data=${encodeURIComponent(data)}`,
     );
     const lib = target.protocol === 'http:' ? http : https;
-    const req = lib.request(
-      target,
-      {
-        method: 'GET',
-        headers: { 'User-Agent': 'Mozilla/5.0', Accept: '*/*' },
-        // 证书必须校验通过；一旦失败直接报错，不降级到明文。
-        rejectUnauthorized: true,
-        timeout: UPSTREAM_TIMEOUT_MS,
-      },
-      (res) => {
+    // 不能把 URL 实例直接传入：Node 8/9 的 http.request(url, options, cb)
+    // 不支持该签名。这里展开成单个 options 对象，各版本均可接受。
+    const targetOptions = {
+      protocol: target.protocol,
+      hostname: target.hostname,
+      port: target.port || (target.protocol === 'http:' ? 80 : 443),
+      path: `${target.pathname}${target.search}`,
+      method: 'GET',
+      headers: { 'User-Agent': 'Mozilla/5.0', Accept: '*/*' },
+      // 证书必须校验通过；一旦失败直接报错，不降级到明文。
+      rejectUnauthorized: true,
+      timeout: UPSTREAM_TIMEOUT_MS,
+    };
+    const req = lib.request(targetOptions, (res) => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           res.resume();
-          const next = new URL(res.headers.location, target).toString();
+          const next = new URLImpl(res.headers.location, target).toString();
           resolve(requestUpstream(next, data));
           return;
         }
@@ -334,7 +360,11 @@ async function weiyanLogin(kami, markcode) {
 
   const t = Math.floor(Date.now() / 1000);
   const sign = md5(`kami=${kami}&markcode=${markcode}&t=${t}&${WEIYAN_APPKEY}`);
-  const value = crypto.randomInt(0, 2764472320);
+  // randomInt 需 Node 14.2+；老运行时用无模偏置的随机字节取模。
+  const value =
+    typeof crypto.randomInt === 'function'
+      ? crypto.randomInt(0, 2764472320)
+      : crypto.randomBytes(4).readUInt32BE(0) % 2764472320;
   const form =
     `kami=${encodeURIComponent(kami)}` +
     `&markcode=${encodeURIComponent(markcode)}` +
@@ -408,13 +438,13 @@ function guardSlots() {
   if (!fs.existsSync(dir)) {
     try {
       fs.mkdirSync(dir, { mode: 0o700, recursive: true });
-    } catch {
+    } catch (e) {
       /* 落到不可用分支 */
     }
   }
   try {
     fs.accessSync(dir, fs.constants.W_OK);
-  } catch {
+  } catch (e) {
     // 缓存不可用时退化为不缓存/不限流，不影响功能正确性。
     // 但限流属于安全控制，不能无声消失：必须留痕。
     console.error(
@@ -440,13 +470,13 @@ function bumpCounter(file, win) {
   try {
     const row = JSON.parse(fs.readFileSync(target, 'utf8'));
     if (row.w === win) n = row.n;
-  } catch {
+  } catch (e) {
     /* 新窗口 */
   }
   n += 1;
   try {
     fs.writeFileSync(target, JSON.stringify({ w: win, n }));
-  } catch {
+  } catch (e) {
     /* 写失败不阻断 */
   }
   return { allowed: true, n, target };
@@ -474,7 +504,7 @@ function guardDistinctCards(req, card) {
   try {
     const row = JSON.parse(fs.readFileSync(target, 'utf8'));
     if (row.w === win && row.s && typeof row.s === 'object') set = row.s;
-  } catch {
+  } catch (e) {
     /* 新窗口 */
   }
   // 用哈希存指纹，避免卡密明文落到 /tmp 或日志里。
@@ -482,7 +512,7 @@ function guardDistinctCards(req, card) {
   const count = Object.keys(set).length;
   try {
     fs.writeFileSync(target, JSON.stringify({ w: win, s: set }));
-  } catch {
+  } catch (e) {
     /* 写失败不阻断 */
   }
   if (count > FC_RATE_DISTINCT) {
@@ -530,7 +560,7 @@ function requireLicense(req) {
           },
         };
       }
-    } catch {
+    } catch (e) {
       /* 无缓存，继续校验 */
     }
   }
@@ -615,8 +645,8 @@ async function handle(req, res) {
 
   let form;
   try {
-    form = new URLSearchParams(raw);
-  } catch {
+    form = new SearchParamsImpl(raw);
+  } catch (e) {
     return fail(res, 400, '参数格式错误');
   }
 
@@ -641,14 +671,14 @@ async function handle(req, res) {
   try {
     const decipher = crypto.createDecipheriv('aes-256-cbc', ENC_KEY, iv);
     plain = Buffer.concat([decipher.update(cipher), decipher.final()]);
-  } catch {
+  } catch (e) {
     return fail(res, 400, '解密失败');
   }
 
   let data;
   try {
     data = JSON.parse(plain.toString('utf8'));
-  } catch {
+  } catch (e) {
     return fail(res, 400, '解密失败');
   }
   // p 必须是普通对象（App 发送的是 {card, markcode}），
@@ -699,7 +729,7 @@ async function handle(req, res) {
             at: Math.floor(Date.now() / 1000),
           }),
         );
-      } catch {
+      } catch (e) {
         /* 缓存失败不影响本次校验结果 */
       }
     }
@@ -732,7 +762,7 @@ async function handler(req, res) {
     console.error('unhandled', e && e.stack ? e.stack : e);
     try {
       fail(res, 500, '服务器内部错误');
-    } catch {
+    } catch (e) {
       /* 响应已发出 */
     }
   }
