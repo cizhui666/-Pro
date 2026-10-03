@@ -42,9 +42,16 @@ const FC_RATE_DISTINCT = envInt('FC_RATE_DISTINCT', 10);
 const FC_CACHE_DIR = envStr('FC_CACHE_DIR', '/tmp/fc_guard');
 
 // 查询上游：词缀库。key 只存在于服务端，App 不持有也不再下发。
-// 默认路径已按 App 端 encodeURI(...) 的结果写成百分号编码（社工 = %E7%A4%BE%E5%B7%A5），
-// http.request 不接受非 ASCII 路径，自定义 FC_CIZHUI_ROOT 时也必须给编码后的值。
-const CIZHUI_ROOT = envStr('FC_CIZHUI_ROOT', 'https://cizhui.j3.ink/%E7%A4%BE%E5%B7%A5/');
+//
+// 临时降级为明文 HTTP：czsgk.dpdns.org 的证书 CN 是 cxtx.xyz，altnames 只有
+// cxtx.xyz 与 www.cxtx.xyz，不含该主机名，直接走 HTTPS 会以
+// ERR_TLS_CERT_ALTNAME_INVALID 失败。等上游为该域名补好证书后，把下面默认值
+// 改成 https:// 即可恢复加密，协议分支已经同时支持 http 与 https，无需再改逻辑。
+// 明文期间 key 与被查关键词/姓名在链路上可见，这是当前已知的代价。
+//
+// 路径必须是纯 ASCII：http.request 遇到非 ASCII 路径会抛 ERR_UNESCAPED_CHARACTERS，
+// 自定义 FC_CIZHUI_ROOT 时需自行百分号编码。
+const CIZHUI_ROOT = envStr('FC_CIZHUI_ROOT', 'http://czsgk.dpdns.org/');
 const CIZHUI_KEY = envStr('FC_CIZHUI_KEY', 'cznb666');
 const CIZHUI_TIMEOUT_MS = envInt('FC_CIZHUI_TIMEOUT_MS', 25000);
 const CIZHUI_MAX_REDIRECTS = envInt('FC_CIZHUI_MAX_REDIRECTS', 3);
@@ -368,6 +375,29 @@ function requestUpstream(endpoint, data) {
   });
 }
 
+// 上游 5xx 时把它的诊断信息透出来，否则 App 只会看到「上游返回 502」，
+// 分不清是对方数据源挂了还是我方故障。只取短文本：完整响应可能很大，
+// 直接回传既冗长，也会把上游内部细节泄露给终端用户。
+function upstreamDiag(body, fallback) {
+  const raw = String(body || '').trim();
+  if (raw === '') return fallback;
+
+  const parts = [];
+  try {
+    const j = JSON.parse(raw);
+    if (j && typeof j === 'object') {
+      if (typeof j.message === 'string' && j.message !== '') parts.push(j.message);
+      if (typeof j.error === 'string' && j.error !== '') parts.push(j.error);
+    }
+  } catch (e) {
+    /* 不是 JSON，落到下面的纯文本截断 */
+  }
+
+  const text = (parts.length ? parts.join('｜') : raw).replace(/\s+/g, ' ').trim();
+  if (text === '') return fallback;
+  return text.length > 160 ? `${text.slice(0, 160)}…` : text;
+}
+
 // 查询串手工拼，不依赖 URLSearchParams 的编码细节，
 // 这样与 PHP 版可以逐字节对拍出同一个 URL。
 function buildCizhuiUrl(name, params) {
@@ -380,8 +410,8 @@ function buildCizhuiUrl(name, params) {
   return `${base}${name}?${qs.join('&')}`;
 }
 
-// 转发查询到词缀库。每跳都重新校验协议，只允许 https，
-// 避免上游用 302 把请求引到明文或内网地址上。
+// 转发查询到词缀库。每跳都重新校验协议，只允许 http/https，
+// 避免上游用 302 把请求引到 file: 之类的协议或内网地址上。
 function requestCizhui(target, redirectsLeft) {
   return new Promise((resolve) => {
     let parsed;
@@ -391,10 +421,12 @@ function requestCizhui(target, redirectsLeft) {
       resolve({ ok: false, status: 0, body: '', err: '上游地址无效' });
       return;
     }
-    if (parsed.protocol !== 'https:') {
-      resolve({ ok: false, status: 0, body: '', err: '上游仅允许 https' });
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      resolve({ ok: false, status: 0, body: '', err: '上游仅允许 http/https' });
       return;
     }
+    const isHttps = parsed.protocol === 'https:';
+    const lib = isHttps ? https : http;
     // http.request 遇到非 ASCII 路径会抛 ERR_UNESCAPED_CHARACTERS，
     // 提前拦下来给出可读原因。
     if (/[^\x20-\x7e]/.test(`${parsed.pathname}${parsed.search}`)) {
@@ -402,18 +434,19 @@ function requestCizhui(target, redirectsLeft) {
       return;
     }
 
-    const req = https.request(
+    const req = lib.request(
       {
+        protocol: parsed.protocol,
         hostname: parsed.hostname,
-        port: parsed.port || 443,
+        port: parsed.port || (isHttps ? 443 : 80),
         path: `${parsed.pathname}${parsed.search}`,
         method: 'GET',
         headers: {
           'User-Agent': 'Mozilla/5.0',
           Accept: 'text/plain, */*',
-          Referer: `https://${parsed.host}/`,
+          Referer: `${parsed.protocol}//${parsed.host}/`,
         },
-        // 证书必须校验通过，不降级到明文。
+        // 走 https 时证书必须校验通过；当前默认明文，此项在切回 https 后才起作用。
         rejectUnauthorized: true,
         timeout: CIZHUI_TIMEOUT_MS,
       },
@@ -854,6 +887,8 @@ async function handle(req, res) {
   }
 
   // 查询路由：综合查询与猎魔。
+  // App 侧调用路径仍是 /czsgk.php 与 /czlm.php，保持不变——改名会让已安装的旧版本
+  // 直接 404；只有转发给上游的文件名换成了 zhcx.php / lm.php。
   // 先按白名单校验入参，再校验卡密，最后才转发；
   // 转发时只拼白名单里的字段，card/markcode 不会带给上游。
   if (pathname === '/czsgk.php' || pathname === '/czlm.php') {
@@ -876,8 +911,8 @@ async function handle(req, res) {
 
     const target =
       pathname === '/czsgk.php'
-        ? buildCizhuiUrl('czsgk.php', { cx })
-        : buildCizhuiUrl('czlm.php', { xm, dq });
+        ? buildCizhuiUrl('zhcx.php', { cx })
+        : buildCizhuiUrl('lm.php', { xm, dq });
 
     const upstream = await requestCizhui(target, CIZHUI_MAX_REDIRECTS);
     if (!upstream.ok) return fail(res, 502, `上游请求失败：${upstream.err}`);
@@ -887,7 +922,7 @@ async function handle(req, res) {
       return fail(res, upstream.status, upstream.body || '上游拒绝查询');
     }
     if (upstream.status < 200 || upstream.status >= 300) {
-      return fail(res, 502, `上游返回 ${upstream.status}`);
+      return fail(res, 502, `上游返回 ${upstream.status}｜${upstreamDiag(upstream.body, '无响应内容')}`);
     }
     return reply(res, 200, 'text/plain; charset=utf-8', upstream.body);
   }
@@ -928,6 +963,7 @@ module.exports = {
   toUtf8,
   knownMessage,
   buildCizhuiUrl,
+  upstreamDiag,
   requestCizhui,
   ENC_KEY,
   MAC_KEY,
